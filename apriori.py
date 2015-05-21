@@ -140,6 +140,39 @@ def print_results(items, rules):
         print("Rule: %s ==> %s , %.3f" % (str(pre), str(post), confidence))
 
 
+def data_from_file(file, ordered=False, ignore=None):
+    """Function which reads from the file and returns a list of records"""
+    if isinstance(file, str):
+        file_iter = open(file, 'rU')
+    else:
+        # If it's not a file name, assume it's a file object
+        file_iter = file
+
+    results = []
+
+    # for line_no, line in enumerate(file_iter):
+    for line in file_iter:
+        # print(line_no)
+        line = line.strip().rstrip(',')                         # Remove trailing comma
+        if ignore:
+            if ordered:
+                record = frozenset(
+                    (index, value)
+                    for index, value in enumerate(line.split(','))
+                    if not ignore(index, value)
+                )
+            else:
+                record = frozenset(value for value in line.split(',') if not ignore(None, value))
+        else:
+            if ordered:
+                record = frozenset((index, value) for index, value in enumerate(line.split(',')))
+            else:
+                record = frozenset(line.split(','))
+        results.append(record)
+
+    return results
+
+
 class FileIterator:
     """File iterator, for efficiently and repeatedly iterating over the records in a potentially large file without
     keeping it loaded in memory."""
@@ -245,6 +278,11 @@ if __name__ == "__main__":
                              help='exclude the comma-separated, zero-based column indices before processing',
                              default='',
                              type='string')
+    option_parser.add_option('-m', '--in-memory',
+                             action='store_true',
+                             dest='in_memory',
+                             help='load data to memory, rather than reading it from file repeatedly',
+                             default=False)
 
     (options, args) = option_parser.parse_args()
 
@@ -289,11 +327,15 @@ if __name__ == "__main__":
             else:
                 value_filter = None
 
-    if not options.input:
+    if options.input is not None and not options.input:
         print('No data set filename specified, system with exit\n')
         sys.exit('System will exit')
 
-    file_iterator = FileIterator(options.input, options.ordered, value_filter)
-    items, rules = run_apriori(file_iterator, options.min_support, options.min_confidence)
+    if options.in_memory or options.input is None:
+        transactions = data_from_file(options.input or sys.stdin, options.ordered, value_filter)
+    else:
+        transactions = FileIterator(options.input, options.ordered, value_filter)
+
+    items, rules = run_apriori(transactions, options.min_support, options.min_confidence)
 
     print_results(items, rules)
