@@ -2,9 +2,9 @@
 Description     : Simple Python implementation of the Apriori Algorithm
 
 Usage:
-    $python apriori.py -f DATASET.csv -s minSupport  -c minConfidence
+    $python apriori.py -f DATA_SET.csv -s minSupport  -c minConfidence
 
-    $python apriori.py -f DATASET.csv -s 0.15 -c 0.6
+    $python apriori.py -f DATA_SET.csv -s 0.15 -c 0.6
 """
 
 import sys
@@ -19,113 +19,122 @@ def subsets(arr):
     return chain(*[combinations(arr, i + 1) for i, a in enumerate(arr)])
 
 
-def returnItemsWithMinSupport(itemSet, transactionList, minSupport, freqSet):
-        """calculates the support for items in the itemSet and returns a subset
-       of the itemSet each of whose elements satisfies the minimum support"""
+def return_items_with_min_support(item_set, transaction_list, min_support, freq_set):
+        """calculates the support for items in the item_set and returns a subset
+       of the item_set each of whose elements satisfies the minimum support"""
         _itemSet = set()
-        localSet = defaultdict(int)
+        local_set = defaultdict(int)
 
-        for item in itemSet:
-                for transaction in transactionList:
+        for item in item_set:
+                for transaction in transaction_list:
                         if item.issubset(transaction):
-                                freqSet[item] += 1
-                                localSet[item] += 1
+                                freq_set[item] += 1
+                                local_set[item] += 1
 
-        for item, count in localSet.items():
-                support = float(count)/len(transactionList)
+        for item, count in local_set.items():
+                support = float(count)/len(transaction_list)
 
-                if support >= minSupport:
+                if support >= min_support:
                         _itemSet.add(item)
 
         return _itemSet
 
 
-def joinSet(itemSet, length):
+def join_set(item_set, length):
         """Join a set with itself and returns the n-element itemsets"""
-        return set([i.union(j) for i in itemSet for j in itemSet if len(i.union(j)) == length])
+        return set([i.union(j) for i in item_set for j in item_set if len(i.union(j)) == length])
 
 
-def getItemSetTransactionList(data_iterator):
-    transactionList = list()
-    itemSet = set()
+def get_item_set_transaction_list(data_iterator):
+    transaction_list = list()
+    item_set = set()
     for record in data_iterator:
         transaction = frozenset(record)
-        transactionList.append(transaction)
+        transaction_list.append(transaction)
         for item in transaction:
-            itemSet.add(frozenset([item]))              # Generate 1-itemSets
-    return itemSet, transactionList
+            item_set.add(frozenset([item]))              # Generate 1-itemsets
+    return item_set, transaction_list
 
 
-def runApriori(data_iter, minSupport, minConfidence):
+def run_apriori(data_iter, min_support, min_confidence):
     """
     run the apriori algorithm. data_iter is a record iterator
     Return both:
      - items (tuple, support)
-     - rules ((pretuple, posttuple), confidence)
+     - rules ((pre_tuple, post_tuple), confidence)
     """
-    itemSet, transactionList = getItemSetTransactionList(data_iter)
+    item_set, transaction_list = get_item_set_transaction_list(data_iter)
 
-    freqSet = defaultdict(int)
-    largeSet = dict()
+    freq_set = defaultdict(int)
+    large_set = dict()
     # Global dictionary which stores (key=n-itemSets,value=support)
-    # which satisfy minSupport
+    # which satisfy min_support
 
-    assocRules = dict()
     # Dictionary which stores Association Rules
 
-    oneCSet = returnItemsWithMinSupport(itemSet,
-                                        transactionList,
-                                        minSupport,
-                                        freqSet)
+    one_candidate_set = return_items_with_min_support(
+        item_set,
+        transaction_list,
+        min_support,
+        freq_set
+    )
 
-    currentLSet = oneCSet
+    current_length_set = one_candidate_set
     k = 2
-    while(currentLSet != set([])):
-        largeSet[k-1] = currentLSet
-        currentLSet = joinSet(currentLSet, k)
-        currentCSet = returnItemsWithMinSupport(currentLSet,
-                                                transactionList,
-                                                minSupport,
-                                                freqSet)
-        currentLSet = currentCSet
-        k = k + 1
+    while current_length_set:
+        large_set[k-1] = current_length_set
+        current_length_set = join_set(current_length_set, k)
+        current_candidate_set = return_items_with_min_support(
+            current_length_set,
+            transaction_list,
+            min_support,
+            freq_set
+        )
+        current_length_set = current_candidate_set
+        k += 1
 
-    def getSupport(item):
+    # noinspection PyShadowingNames
+    def get_support(item):
             """local function which Returns the support of an item"""
-            return float(freqSet[item])/len(transactionList)
+            return float(freq_set[item])/len(transaction_list)
 
-    toRetItems = []
-    for key, value in largeSet.items():
-        toRetItems.extend([(tuple(item), getSupport(item))
-                           for item in value])
+    result_items = []
+    for key, value in large_set.items():
+        result_items.extend([
+            (tuple(item), get_support(item))
+            for item in value
+        ])
 
-    toRetRules = []
-    for key, value in largeSet.items()[1:]:
+    result_rules = []
+    for key, value in large_set.items()[1:]:
         for item in value:
             _subsets = map(frozenset, [x for x in subsets(item)])
             for element in _subsets:
                 remain = item.difference(element)
                 if len(remain) > 0:
-                    confidence = getSupport(item)/getSupport(element)
-                    if confidence >= minConfidence:
-                        toRetRules.append(((tuple(element), tuple(remain)),
-                                           confidence))
-    return toRetItems, toRetRules
+                    confidence = get_support(item)/get_support(element)
+                    if confidence >= min_confidence:
+                        result_rules.append((
+                            (tuple(element), tuple(remain)),
+                            confidence)
+                        )
+    return result_items, result_rules
 
 
-def printResults(items, rules):
+# noinspection PyShadowingNames
+def print_results(items, rules):
     """prints the generated itemsets and the confidence rules"""
     for item, support in items:
-        print "item: %s , %.3f" % (str(item), support)
-    print "\n------------------------ RULES:"
+        print("item: %s , %.3f" % (str(item), support))
+    print("\n------------------------ RULES:")
     for rule, confidence in rules:
         pre, post = rule
-        print "Rule: %s ==> %s , %.3f" % (str(pre), str(post), confidence)
+        print("Rule: %s ==> %s , %.3f" % (str(pre), str(post), confidence))
 
 
-def dataFromFile(fname):
+def data_from_file(file_name):
         """Function which reads from the file and yields a generator"""
-        file_iter = open(fname, 'rU')
+        file_iter = open(file_name, 'rU')
         for line in file_iter:
                 line = line.strip().rstrip(',')                         # Remove trailing comma
                 record = frozenset(line.split(','))
@@ -134,36 +143,36 @@ def dataFromFile(fname):
 
 if __name__ == "__main__":
 
-    optparser = OptionParser()
-    optparser.add_option('-f', '--inputFile',
-                         dest='input',
-                         help='filename containing csv',
-                         default=None)
-    optparser.add_option('-s', '--minSupport',
-                         dest='minS',
-                         help='minimum support value',
-                         default=0.15,
-                         type='float')
-    optparser.add_option('-c', '--minConfidence',
-                         dest='minC',
-                         help='minimum confidence value',
-                         default=0.6,
-                         type='float')
+    option_parser = OptionParser()
+    option_parser.add_option('-f', '--inputFile',
+                             dest='input',
+                             help='filename containing csv',
+                             default=None)
+    option_parser.add_option('-s', '--minSupport',
+                             dest='minS',
+                             help='minimum support value',
+                             default=0.15,
+                             type='float')
+    option_parser.add_option('-c', '--minConfidence',
+                             dest='minC',
+                             help='minimum confidence value',
+                             default=0.6,
+                             type='float')
 
-    (options, args) = optparser.parse_args()
+    (options, args) = option_parser.parse_args()
 
     inFile = None
     if options.input is None:
             inFile = sys.stdin
     elif options.input is not None:
-            inFile = dataFromFile(options.input)
+            inFile = data_from_file(options.input)
     else:
-            print 'No dataset filename specified, system with exit\n'
+            print('No data set filename specified, system with exit\n')
             sys.exit('System will exit')
 
     minSupport = options.minS
     minConfidence = options.minC
 
-    items, rules = runApriori(inFile, minSupport, minConfidence)
+    items, rules = run_apriori(inFile, minSupport, minConfidence)
 
-    printResults(items, rules)
+    print_results(items, rules)
