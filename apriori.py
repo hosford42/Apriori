@@ -18,20 +18,20 @@ def subsets(arr):
     return chain(*(combinations(arr, i + 1) for i in range(len(arr))))
 
 
-def get_items_with_min_support(item_set, transaction_list, min_support, freq_set):
+def get_items_with_min_support(item_set, transactions, min_support, freq_set):
     """Calculates the support for items in the itemset and returns a subset
     of the itemset each of whose elements satisfies the minimum support."""
     results = set()
     local_set = defaultdict(int)
 
     for item in item_set:
-        for transaction in transaction_list:
+        for transaction in transactions:
             if item <= transaction:
                 freq_set[item] += 1
                 local_set[item] += 1
 
     for item, count in local_set.items():
-        support = count / len(transaction_list)
+        support = count / len(transactions)
 
         if support >= min_support:
             results.add(item)
@@ -44,15 +44,12 @@ def join_set(item_set, length):
     return {i.union(j) for i in item_set for j in item_set if len(i.union(j)) == length}
 
 
-def get_item_set_transaction_list(data_iterator):
-    transaction_list = []
+def get_initial_itemsets(transactions):
     item_set = set()
-    for record in data_iterator:
-        transaction = frozenset(record)
-        transaction_list.append(transaction)
+    for transaction in transactions:
         for item in transaction:
             item_set.add(frozenset([item]))              # Generate 1-itemsets
-    return item_set, transaction_list
+    return item_set
 
 
 def run_apriori(data_iter, min_support, min_confidence):
@@ -62,7 +59,7 @@ def run_apriori(data_iter, min_support, min_confidence):
      - items (tuple, support)
      - rules ((pre_tuple, post_tuple), confidence)
     """
-    item_set, transaction_list = get_item_set_transaction_list(data_iter)
+    item_set = get_initial_itemsets(data_iter)
 
     freq_set = defaultdict(int)
     large_set = {}
@@ -73,7 +70,7 @@ def run_apriori(data_iter, min_support, min_confidence):
 
     current_length_set = get_items_with_min_support(
         item_set,
-        transaction_list,
+        data_iter,
         min_support,
         freq_set
     )
@@ -85,7 +82,7 @@ def run_apriori(data_iter, min_support, min_confidence):
         current_length_set = join_set(current_length_set, k)
         current_candidate_set = get_items_with_min_support(
             current_length_set,
-            transaction_list,
+            data_iter,
             min_support,
             freq_set
         )
@@ -95,7 +92,7 @@ def run_apriori(data_iter, min_support, min_confidence):
     # noinspection PyShadowingNames
     def get_support(item):
         """Local function which returns the support of an item"""
-        return freq_set[item] / len(transaction_list)
+        return freq_set[item] / len(data_iter)
 
     result_items = []
     for key, value in large_set.items():
@@ -116,7 +113,7 @@ def run_apriori(data_iter, min_support, min_confidence):
                     confidence = get_support(item) / get_support(subset)
                     if confidence >= min_confidence:
                         result_rules.append((
-                            (tuple(subset), tuple(remain)),
+                            (tuple(sorted(subset)), tuple(sorted(remain))),
                             confidence)
                         )
     return result_items, result_rules
@@ -133,33 +130,69 @@ def print_results(items, rules):
         print("Rule: %s ==> %s , %.3f" % (str(pre), str(post), confidence))
 
 
-def data_from_file(file, ordered=False, ignore=None):
-    """Function which reads from the file and yields a generator"""
-    if isinstance(file, str):
-        file_iter = open(file, 'rU')
-    else:
-        # If it's not a file name, assume it's a file object
-        file_iter = file
+class FileIterator:
+    """File iterator, for efficiently and repeatedly iterating over the records in a potentially large file without
+    keeping it loaded in memory."""
 
-    # for line_no, line in enumerate(file_iter):
-    for line in file_iter:
-        # print(line_no)
+    def __init__(self, file_path, ordered=False, ignore=None):
+        self.file_path = file_path
+        self.ordered = bool(ordered)
+        self.ignore = bool(ignore)
+        self._count = None
+
+    @staticmethod
+    def _get_simple_record(line):
         line = line.strip().rstrip(',')                         # Remove trailing comma
-        if ignore:
-            if ordered:
-                record = frozenset(
-                    (index, value)
-                    for index, value in enumerate(line.split(','))
-                    if not ignore(index, value)
-                )
+        return frozenset(line.split(','))
+
+    def _get_filtered_record(self, line):
+        line = line.strip().rstrip(',')                         # Remove trailing comma
+        return frozenset(value for value in line.split(',') if not self.ignore(None, value))
+
+    @staticmethod
+    def _get_ordered_record(line):
+        line = line.strip().rstrip(',')                         # Remove trailing comma
+        return frozenset((index, value) for index, value in enumerate(line.split(',')))
+
+    def _get_ordered_filtered_record(self, line):
+        line = line.strip().rstrip(',')                         # Remove trailing comma
+        return frozenset(
+            (index, value)
+            for index, value in enumerate(line.split(','))
+            if not self.ignore(index, value)
+        )
+
+    def __len__(self):
+        if self._count is None:
+            for counter, line in open(self.file_path):
+                pass
+            self._count = counter + 1
+        return self._count
+
+    def __iter__(self):
+        # By making the choice here, it is avoided once per line later on, which should give a slight speed boost
+        if self.ordered:
+            if self.ignore:
+                get_record = self._get_ordered_filtered_record
             else:
-                record = frozenset(value for value in line.split(',') if not ignore(None, value))
+                get_record = self._get_ordered_record
         else:
-            if ordered:
-                record = frozenset((index, value) for index, value in enumerate(line.split(',')))
+            if self.ignore:
+                get_record = self._get_filtered_record
             else:
-                record = frozenset(line.split(','))
-        yield record
+                get_record = self._get_simple_record
+
+        if self._count is None:
+            with open(self.file_path) as file:
+                for counter, line in enumerate(file):
+                    yield get_record(line)
+                self._count = counter + 1
+        else:
+            with open(self.file_path) as file:
+                for line in file:
+                    yield get_record(line)
+
+
 
 
 if __name__ == "__main__":
@@ -194,8 +227,9 @@ if __name__ == "__main__":
     (options, args) = option_parser.parse_args()
 
     def null_value(value):
+        """Returns True if the value is something which ought to be treated as a null."""
         value = value.strip().upper()
-        return not value or value == 'NONE' or value == 'NA'
+        return not value or value == 'NONE' or value == 'NA' or value == 'NULL'
 
     if options.ignore_nulls:
         def value_filter(_, value):
@@ -203,12 +237,11 @@ if __name__ == "__main__":
     else:
         value_filter = None
 
-    if options.input is not None and not options.input:
+    if not options.input:
         print('No data set filename specified, system with exit\n')
         sys.exit('System will exit')
 
-    in_file = data_from_file(options.input or sys.stdin, options.ordered, value_filter)
-
-    items, rules = run_apriori(in_file, options.min_support, options.min_confidence)
+    file_iterator = FileIterator(options.input, options.ordered, value_filter)
+    items, rules = run_apriori(file_iterator, options.min_support, options.min_confidence)
 
     print_results(items, rules)
