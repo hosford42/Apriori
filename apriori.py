@@ -11,42 +11,41 @@ import sys
 
 from itertools import chain, combinations
 from collections import defaultdict
-from optparse import OptionParser
 
 
 def subsets(arr):
-    """ Returns non empty subsets of arr"""
-    return chain(*[combinations(arr, i + 1) for i, a in enumerate(arr)])
+    """Return non-empty subsets of arr"""
+    return chain(*(combinations(arr, i + 1) for i in range(len(arr))))
 
 
-def return_items_with_min_support(item_set, transaction_list, min_support, freq_set):
-        """calculates the support for items in the item_set and returns a subset
-       of the item_set each of whose elements satisfies the minimum support"""
-        _itemSet = set()
-        local_set = defaultdict(int)
+def get_items_with_min_support(item_set, transaction_list, min_support, freq_set):
+    """Calculates the support for items in the itemset and returns a subset
+    of the itemset each of whose elements satisfies the minimum support."""
+    results = set()
+    local_set = defaultdict(int)
 
-        for item in item_set:
-                for transaction in transaction_list:
-                        if item.issubset(transaction):
-                                freq_set[item] += 1
-                                local_set[item] += 1
+    for item in item_set:
+        for transaction in transaction_list:
+            if item <= transaction:
+                freq_set[item] += 1
+                local_set[item] += 1
 
-        for item, count in local_set.items():
-                support = float(count)/len(transaction_list)
+    for item, count in local_set.items():
+        support = count / len(transaction_list)
 
-                if support >= min_support:
-                        _itemSet.add(item)
+        if support >= min_support:
+            results.add(item)
 
-        return _itemSet
+    return results
 
 
 def join_set(item_set, length):
-        """Join a set with itself and returns the n-element itemsets"""
-        return set([i.union(j) for i in item_set for j in item_set if len(i.union(j)) == length])
+    """Join a set with itself and returns the n-element itemsets"""
+    return {i.union(j) for i in item_set for j in item_set if len(i.union(j)) == length}
 
 
 def get_item_set_transaction_list(data_iterator):
-    transaction_list = list()
+    transaction_list = []
     item_set = set()
     for record in data_iterator:
         transaction = frozenset(record)
@@ -58,7 +57,7 @@ def get_item_set_transaction_list(data_iterator):
 
 def run_apriori(data_iter, min_support, min_confidence):
     """
-    run the apriori algorithm. data_iter is a record iterator
+    Run the apriori algorithm. data_iter is a record iterator
     Return both:
      - items (tuple, support)
      - rules ((pre_tuple, post_tuple), confidence)
@@ -66,25 +65,25 @@ def run_apriori(data_iter, min_support, min_confidence):
     item_set, transaction_list = get_item_set_transaction_list(data_iter)
 
     freq_set = defaultdict(int)
-    large_set = dict()
+    large_set = {}
     # Global dictionary which stores (key=n-itemSets,value=support)
     # which satisfy min_support
 
     # Dictionary which stores Association Rules
 
-    one_candidate_set = return_items_with_min_support(
+    current_length_set = get_items_with_min_support(
         item_set,
         transaction_list,
         min_support,
         freq_set
     )
 
-    current_length_set = one_candidate_set
     k = 2
     while current_length_set:
+        print(k)
         large_set[k-1] = current_length_set
         current_length_set = join_set(current_length_set, k)
-        current_candidate_set = return_items_with_min_support(
+        current_candidate_set = get_items_with_min_support(
             current_length_set,
             transaction_list,
             min_support,
@@ -95,8 +94,8 @@ def run_apriori(data_iter, min_support, min_confidence):
 
     # noinspection PyShadowingNames
     def get_support(item):
-            """local function which Returns the support of an item"""
-            return float(freq_set[item])/len(transaction_list)
+        """Local function which returns the support of an item"""
+        return freq_set[item] / len(transaction_list)
 
     result_items = []
     for key, value in large_set.items():
@@ -110,14 +109,14 @@ def run_apriori(data_iter, min_support, min_confidence):
         if key < 2:
             continue
         for item in value:
-            _subsets = map(frozenset, [x for x in subsets(item)])
-            for element in _subsets:
-                remain = item.difference(element)
+            for subset in subsets(item):
+                subset = frozenset(subset)
+                remain = item.difference(subset)
                 if len(remain) > 0:
-                    confidence = get_support(item)/get_support(element)
+                    confidence = get_support(item) / get_support(subset)
                     if confidence >= min_confidence:
                         result_rules.append((
-                            (tuple(element), tuple(remain)),
+                            (tuple(subset), tuple(remain)),
                             confidence)
                         )
     return result_items, result_rules
@@ -134,16 +133,37 @@ def print_results(items, rules):
         print("Rule: %s ==> %s , %.3f" % (str(pre), str(post), confidence))
 
 
-def data_from_file(file_name):
-        """Function which reads from the file and yields a generator"""
-        file_iter = open(file_name, 'rU')
-        for line in file_iter:
-                line = line.strip().rstrip(',')                         # Remove trailing comma
+def data_from_file(file, ordered=False, ignore=None):
+    """Function which reads from the file and yields a generator"""
+    if isinstance(file, str):
+        file_iter = open(file, 'rU')
+    else:
+        # If it's not a file name, assume it's a file object
+        file_iter = file
+
+    # for line_no, line in enumerate(file_iter):
+    for line in file_iter:
+        # print(line_no)
+        line = line.strip().rstrip(',')                         # Remove trailing comma
+        if ignore:
+            if ordered:
+                record = frozenset(
+                    (index, value)
+                    for index, value in enumerate(line.split(','))
+                    if not ignore(index, value)
+                )
+            else:
+                record = frozenset(value for value in line.split(',') if not ignore(None, value))
+        else:
+            if ordered:
+                record = frozenset((index, value) for index, value in enumerate(line.split(',')))
+            else:
                 record = frozenset(line.split(','))
-                yield record
+        yield record
 
 
 if __name__ == "__main__":
+    from optparse import OptionParser
 
     option_parser = OptionParser()
     option_parser.add_option('-f', '--inputFile',
@@ -151,30 +171,44 @@ if __name__ == "__main__":
                              help='filename containing csv',
                              default=None)
     option_parser.add_option('-s', '--minSupport',
-                             dest='minS',
+                             dest='min_support',
                              help='minimum support value',
                              default=0.15,
                              type='float')
     option_parser.add_option('-c', '--minConfidence',
-                             dest='minC',
+                             dest='min_confidence',
                              help='minimum confidence value',
                              default=0.6,
                              type='float')
+    option_parser.add_option('-o', '--ordered',
+                             action='store_true',
+                             dest='ordered',
+                             help='data consists of ordered columns',
+                             default=False)
+    option_parser.add_option('-i', '--ignore-nulls',
+                             action='store_true',
+                             dest='ignore_nulls',
+                             help='ignore null values (blanks, "None", "NA")',
+                             default=False)
 
     (options, args) = option_parser.parse_args()
 
-    inFile = None
-    if options.input is None:
-            inFile = sys.stdin
-    elif options.input is not None:
-            inFile = data_from_file(options.input)
+    def null_value(value):
+        value = value.strip().upper()
+        return not value or value == 'NONE' or value == 'NA'
+
+    if options.ignore_nulls:
+        def value_filter(_, value):
+            return null_value(value)
     else:
-            print('No data set filename specified, system with exit\n')
-            sys.exit('System will exit')
+        value_filter = None
 
-    minSupport = options.minS
-    minConfidence = options.minC
+    if options.input is not None and not options.input:
+        print('No data set filename specified, system with exit\n')
+        sys.exit('System will exit')
 
-    items, rules = run_apriori(inFile, minSupport, minConfidence)
+    in_file = data_from_file(options.input or sys.stdin, options.ordered, value_filter)
+
+    items, rules = run_apriori(in_file, options.min_support, options.min_confidence)
 
     print_results(items, rules)
