@@ -206,106 +206,63 @@ def write_rules(path, rules, ordered=False, dialect='excel', *args, **kwargs):
                 writer.writerow(row)
 
 
-# TODO: Make a common function or class which both FileIterator and data_from_file use, to eliminate duplication
-#       of code.
-def data_from_file(file, ordered=False, ignore=None):
+def iter_rows(file_obj, ordered=False, ignore=None, dialect='excel', *args, **kwargs):
+    """Return an iterator over the rows in the file."""
+    reader = csv.reader(file_obj, dialect, *args, **kwargs)
+
+    if ordered:
+        if ignore:
+            get_record = lambda row: frozenset(
+                (index, value)
+                for index, value in enumerate(row)
+                if not ignore(index, value)
+            )
+        else:
+            get_record = lambda row: frozenset((index, value) for index, value in enumerate(row))
+    else:
+        if ignore:
+            get_record = lambda row: frozenset(value for index, value in enumerate(row) if not ignore(index, value))
+        else:
+            get_record = frozenset
+
+    return (get_record(row) for row in reader if row and (len(row) > 1 or row[0]))
+
+
+def data_from_file(file, ordered=False, ignore=None, dialect='excel', *args, **kwargs):
     """Function which reads from the file and returns a list of records"""
     if isinstance(file, str):
-        file_iter = open(file, 'rU')
+        with open(file, newline='') as file_iter:
+            return list(iter_rows(file_iter, ordered, ignore, dialect, *args, **kwargs))
     else:
-        # If it's not a file name, assume it's a file object
-        file_iter = file
-
-    results = []
-
-    # for line_no, line in enumerate(file_iter):
-    for line in file_iter:
-        # print(line_no)
-        # TODO: Use csv module instead of splitting by ','
-        line = line.strip().rstrip(',')                         # Remove trailing comma
-        if ignore:
-            if ordered:
-                record = frozenset(
-                    (index, value)
-                    for index, value in enumerate(line.split(','))
-                    if not ignore(index, value)
-                )
-            else:
-                record = frozenset(value for value in line.split(',') if not ignore(None, value))
-        else:
-            if ordered:
-                record = frozenset((index, value) for index, value in enumerate(line.split(',')))
-            else:
-                record = frozenset(line.split(','))
-        results.append(record)
-
-    return results
+        # If it's not a file name, assume it's a file-like object
+        return list(iter_rows(file, ordered, ignore, dialect, *args, **kwargs))
 
 
 class FileIterator:
     """File iterator, for efficiently and repeatedly iterating over the records in a potentially large file without
     keeping it loaded in memory."""
 
-    def __init__(self, file_path, ordered=False, ignore=None):
+    def __init__(self, file_path, ordered=False, ignore=None, dialect='excel', *args, **kwargs):
         self.file_path = file_path
         self.ordered = bool(ordered)
         self.ignore = ignore
+        self.dialect = dialect
+        self.args = args
+        self.kwargs = kwargs
         self._count = None
-
-    @staticmethod
-    def _get_simple_record(line):
-        line = line.strip().rstrip(',')                         # Remove trailing comma
-        return frozenset(line.split(','))
-
-    def _get_filtered_record(self, line):
-        line = line.strip().rstrip(',')                         # Remove trailing comma
-        return frozenset(value for index, value in line.split(',') if not self.ignore(index, value))
-
-    @staticmethod
-    def _get_ordered_record(line):
-        line = line.strip().rstrip(',')                         # Remove trailing comma
-        return frozenset((index, value) for index, value in enumerate(line.split(',')))
-
-    def _get_ordered_filtered_record(self, line):
-        line = line.strip().rstrip(',')                         # Remove trailing comma
-        return frozenset(
-            (index, value)
-            for index, value in enumerate(line.split(','))
-            if not self.ignore(index, value)
-        )
 
     def __len__(self):
         if self._count is None:
             counter = -1
-            for counter, line in open(self.file_path):
+            for counter, line in enumerate(open(self.file_path)):
                 pass
             self._count = counter + 1
         return self._count
 
     def __iter__(self):
-        # By making the choice here, it is avoided once per line later on, which should give a slight speed boost
-        if self.ordered:
-            if self.ignore:
-                get_record = self._get_ordered_filtered_record
-            else:
-                get_record = self._get_ordered_record
-        else:
-            if self.ignore:
-                get_record = self._get_filtered_record
-            else:
-                get_record = self._get_simple_record
-
-        # TODO: Use csv module instead of splitting by ','
-        if self._count is None:
-            with open(self.file_path) as file:
-                counter = -1
-                for counter, line in enumerate(file):
-                    yield get_record(line)
-                self._count = counter + 1
-        else:
-            with open(self.file_path) as file:
-                for line in file:
-                    yield get_record(line)
+        with open(self.file_path, newline='') as file:
+            for row in iter_rows(file, self.ordered, self.ignore, self.dialect, *self.args, **self.kwargs):
+                yield row
 
 
 if __name__ == "__main__":
