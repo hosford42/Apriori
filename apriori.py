@@ -7,6 +7,7 @@ Usage:
     $python apriori.py -f DATA_SET.csv -s 0.15 -c 0.6
 """
 
+import logging
 import sys
 
 from itertools import chain, combinations
@@ -59,6 +60,9 @@ def run_apriori(data_iter, min_support, min_confidence):
      - items (tuple, support)
      - rules ((pre_tuple, post_tuple), confidence)
     """
+    logger = logging.getLogger(__name__)
+
+    logger.info("Getting initial itemsets")
     item_set = get_initial_itemsets(data_iter)
 
     freq_set = defaultdict(int)
@@ -68,6 +72,7 @@ def run_apriori(data_iter, min_support, min_confidence):
 
     # Dictionary which stores Association Rules
 
+    logger.info("Getting items with minimum support for k = 1")
     current_length_set = get_items_with_min_support(
         item_set,
         data_iter,
@@ -77,9 +82,10 @@ def run_apriori(data_iter, min_support, min_confidence):
 
     k = 2
     while current_length_set:
-        print(k)
         large_set[k-1] = current_length_set
+        logger.info("Joining subsets for k = %s", k)
         current_length_set = join_set(current_length_set, k)
+        logger.info("Getting items with minimum support for k = %s", k)
         current_candidate_set = get_items_with_min_support(
             current_length_set,
             data_iter,
@@ -95,16 +101,18 @@ def run_apriori(data_iter, min_support, min_confidence):
         return freq_set[item] / len(data_iter)
 
     result_items = []
-    for key, value in large_set.items():
+    for key, value in sorted(large_set.items()):
+        logger.info("Determining item support values for k = %s", key)
         result_items.extend([
             (tuple(item), get_support(item))
             for item in value
         ])
 
     result_rules = []
-    for key, value in large_set.items():
+    for key, value in sorted(large_set.items()):
         if key < 2:
             continue
+        logger.info("Rule confidence values for k = %s", key)
         for item in value:
             for subset in subsets(item):
                 subset = frozenset(subset)
@@ -116,6 +124,8 @@ def run_apriori(data_iter, min_support, min_confidence):
                             (tuple(sorted(subset)), tuple(sorted(remain))),
                             confidence)
                         )
+
+    logger.info("Processing complete.")
     return result_items, result_rules
 
 
@@ -197,6 +207,8 @@ class FileIterator:
 
 if __name__ == "__main__":
     from optparse import OptionParser
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
     option_parser = OptionParser()
     option_parser.add_option('-f', '--inputFile',
