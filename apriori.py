@@ -7,6 +7,7 @@ Usage:
     $python apriori.py -f DATA_SET.csv -s 0.15 -c 0.6
 """
 
+import csv
 import logging
 import sys
 
@@ -101,7 +102,7 @@ def run_apriori(data_iter, min_support, min_confidence):
         return freq_set[item] / len(data_iter)
 
     result_items = []
-    for key, value in sorted(large_set.items()):
+    for key, value in large_set.items():
         logger.info("Determining item support values for k = %s", key)
         result_items.extend([
             (tuple(item), get_support(item))
@@ -109,7 +110,7 @@ def run_apriori(data_iter, min_support, min_confidence):
         ])
 
     result_rules = []
-    for key, value in sorted(large_set.items()):
+    for key, value in large_set.items():
         if key < 2:
             continue
         logger.info("Rule confidence values for k = %s", key)
@@ -121,7 +122,7 @@ def run_apriori(data_iter, min_support, min_confidence):
                     confidence = get_support(item) / get_support(subset)
                     if confidence >= min_confidence:
                         result_rules.append((
-                            (tuple(sorted(subset)), tuple(sorted(remain))),
+                            (tuple(subset), tuple(remain)),
                             confidence)
                         )
 
@@ -129,17 +130,84 @@ def run_apriori(data_iter, min_support, min_confidence):
     return result_items, result_rules
 
 
+def itemset_to_string(itemset, ordered=False):
+    """Converts an itemset to a readable string."""
+    if ordered:
+        return ', '.join(str(index) + ': ' + value for index, value in sorted(itemset))
+    else:
+        return ', '.join(value for value in sorted(itemset))
+
+
 # noinspection PyShadowingNames
-def print_results(items, rules):
-    """prints the generated itemsets and the confidence rules"""
-    for item, support in items:
-        print("item: %s , %.3f" % (str(item), support))
-    print("\n------------------------ RULES:")
-    for rule, confidence in rules:
-        pre, post = rule
-        print("Rule: %s ==> %s , %.3f" % (str(pre), str(post), confidence))
+def print_itemsets(itemsets, ordered=False):
+    """Prints the generated itemsets."""
+    for itemset, support in sorted(itemsets, key=lambda pair: (pair[-1], pair), reverse=True):
+        print("Itemset: %s  [%.3f]" % (itemset_to_string(itemset, ordered), support))
 
 
+# noinspection PyShadowingNames
+def print_rules(rules, ordered=False):
+    """Prints the generated rules."""
+    for (condition, prediction), confidence in sorted(rules, key=lambda pair: (pair[-1], pair), reverse=True):
+        print("Rule: %s  =>  %s  [%.3f]" % (
+            itemset_to_string(condition, ordered),
+            itemset_to_string(prediction, ordered),
+            confidence
+        ))
+
+
+# noinspection PyShadowingNames
+def write_itemsets(path, itemsets, ordered=False, dialect='excel', *args, **kwargs):
+    """
+    Writes the itemsets out to a file in CSV format. The rows are organized as follows:
+        "Support", "Size of Itemset", "Value1", ..., "ValueN"
+    If the input file is ordered, indices are prepended to the values, with a separating colon, i.e. "Index: Value".
+    """
+    with open(path, 'w', newline='') as save_file:
+        writer = csv.writer(save_file, dialect, *args, **kwargs)
+
+        if ordered:
+            for itemset, support in sorted(itemsets, key=lambda pair: (pair[-1], pair), reverse=True):
+                row = [support, len(itemset)]
+                row.extend(str(index) + ': ' + value for index, value in sorted(itemset))
+                writer.writerow(row)
+        else:
+            for itemset, support in sorted(itemsets, key=lambda pair: (pair[-1], pair), reverse=True):
+                row = [support, len(itemset)]
+                row.extend(sorted(itemset))
+                writer.writerow(row)
+
+
+# noinspection PyShadowingNames
+def write_rules(path, rules, ordered=False, dialect='excel', *args, **kwargs):
+    """
+    Writes the rules out to a file in CSV format. The rows are organized as follows:
+        "Confidence", "Size of Condition", "Value1", ..., "ValueN", "=>", "Size of Prediction", "Value1", ..., "ValueM"
+    If the input file is ordered, indices are prepended to the values, with a separating colon, i.e. "Index: Value".
+    """
+    with open(path, 'w', newline='') as save_file:
+        writer = csv.writer(save_file, dialect, *args, **kwargs)
+
+        if ordered:
+            for (condition, prediction), confidence in sorted(rules, key=lambda pair: (pair[-1], pair), reverse=True):
+                row = [confidence, len(condition)]
+                row.extend(str(index) + ': ' + value for index, value in sorted(condition))
+                row.append('=>')
+                row.append(len(prediction))
+                row.extend(str(index) + ': ' + value for index, value in sorted(prediction))
+                writer.writerow(row)
+        else:
+            for (condition, prediction), confidence in sorted(rules, key=lambda pair: (pair[-1], pair), reverse=True):
+                row = [confidence, len(condition)]
+                row.extend(sorted(condition))
+                row.append('=>')
+                row.append(len(prediction))
+                row.extend(sorted(prediction))
+                writer.writerow(row)
+
+
+# TODO: Make a common function or class which both FileIterator and data_from_file use, to eliminate duplication
+#       of code.
 def data_from_file(file, ordered=False, ignore=None):
     """Function which reads from the file and returns a list of records"""
     if isinstance(file, str):
@@ -153,6 +221,7 @@ def data_from_file(file, ordered=False, ignore=None):
     # for line_no, line in enumerate(file_iter):
     for line in file_iter:
         # print(line_no)
+        # TODO: Use csv module instead of splitting by ','
         line = line.strip().rstrip(',')                         # Remove trailing comma
         if ignore:
             if ordered:
@@ -226,6 +295,7 @@ class FileIterator:
             else:
                 get_record = self._get_simple_record
 
+        # TODO: Use csv module instead of splitting by ','
         if self._count is None:
             with open(self.file_path) as file:
                 counter = -1
@@ -241,19 +311,20 @@ class FileIterator:
 if __name__ == "__main__":
     from optparse import OptionParser
 
+    # TODO: Add command-line options to control log level, format, and path.
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
     option_parser = OptionParser()
-    option_parser.add_option('-f', '--inputFile',
+    option_parser.add_option('-f', '--input-file',
                              dest='input',
                              help='filename containing csv',
                              default=None)
-    option_parser.add_option('-s', '--minSupport',
+    option_parser.add_option('-s', '--min-support',
                              dest='min_support',
                              help='minimum support value',
                              default=0.15,
                              type='float')
-    option_parser.add_option('-c', '--minConfidence',
+    option_parser.add_option('-c', '--min-confidence',
                              dest='min_confidence',
                              help='minimum confidence value',
                              default=0.6,
@@ -261,7 +332,7 @@ if __name__ == "__main__":
     option_parser.add_option('-o', '--ordered',
                              action='store_true',
                              dest='ordered',
-                             help='data consists of ordered columns',
+                             help='data consists of ordered, indexable columns',
                              default=False)
     option_parser.add_option('-n', '--non-nulls',
                              action='store_true',
@@ -283,6 +354,14 @@ if __name__ == "__main__":
                              dest='in_memory',
                              help='load data to memory, rather than reading it from file repeatedly',
                              default=False)
+    option_parser.add_option('-i', '--itemsets-file',
+                             dest='itemsets',
+                             help='filename where itemsets are saved (csv format)',
+                             default=None)
+    option_parser.add_option('-r', '--rules-file',
+                             dest='rules',
+                             help='filename where rules are saved (csv format)',
+                             default=None)
 
     (options, args) = option_parser.parse_args()
 
@@ -332,10 +411,18 @@ if __name__ == "__main__":
         sys.exit('System will exit')
 
     if options.in_memory or options.input is None:
-        transactions = data_from_file(options.input or sys.stdin, options.ordered, value_filter)
+        transactions_iterable = data_from_file(options.input or sys.stdin, options.ordered, value_filter)
     else:
-        transactions = FileIterator(options.input, options.ordered, value_filter)
+        transactions_iterable = FileIterator(options.input, options.ordered, value_filter)
 
-    items, rules = run_apriori(transactions, options.min_support, options.min_confidence)
+    itemsets, rules = run_apriori(transactions_iterable, options.min_support, options.min_confidence)
 
-    print_results(items, rules)
+    if options.itemsets:
+        write_itemsets(options.itemsets, itemsets, options.ordered)
+    elif options.itemsets is None:
+        print_itemsets(itemsets, options.ordered)
+
+    if options.rules:
+        write_rules(options.rules, rules, options.ordered)
+    elif options.rules is None:
+        print_rules(rules, options.ordered)
