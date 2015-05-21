@@ -137,7 +137,7 @@ class FileIterator:
     def __init__(self, file_path, ordered=False, ignore=None):
         self.file_path = file_path
         self.ordered = bool(ordered)
-        self.ignore = bool(ignore)
+        self.ignore = ignore
         self._count = None
 
     @staticmethod
@@ -164,6 +164,7 @@ class FileIterator:
 
     def __len__(self):
         if self._count is None:
+            counter = -1
             for counter, line in open(self.file_path):
                 pass
             self._count = counter + 1
@@ -184,6 +185,7 @@ class FileIterator:
 
         if self._count is None:
             with open(self.file_path) as file:
+                counter = -1
                 for counter, line in enumerate(file):
                     yield get_record(line)
                 self._count = counter + 1
@@ -191,8 +193,6 @@ class FileIterator:
             with open(self.file_path) as file:
                 for line in file:
                     yield get_record(line)
-
-
 
 
 if __name__ == "__main__":
