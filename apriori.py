@@ -106,7 +106,9 @@ def run_apriori(data_iter, min_support, min_confidence):
         ])
 
     result_rules = []
-    for key, value in large_set.items()[1:]:
+    for key, value in large_set.items():
+        if key < 2:
+            continue
         for item in value:
             _subsets = map(frozenset, [x for x in subsets(item)])
             for element in _subsets:
