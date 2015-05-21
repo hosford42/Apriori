@@ -157,7 +157,7 @@ class FileIterator:
 
     def _get_filtered_record(self, line):
         line = line.strip().rstrip(',')                         # Remove trailing comma
-        return frozenset(value for value in line.split(',') if not self.ignore(None, value))
+        return frozenset(value for index, value in line.split(',') if not self.ignore(index, value))
 
     @staticmethod
     def _get_ordered_record(line):
@@ -230,24 +230,64 @@ if __name__ == "__main__":
                              dest='ordered',
                              help='data consists of ordered columns',
                              default=False)
-    option_parser.add_option('-i', '--ignore-nulls',
+    option_parser.add_option('-n', '--non-nulls',
                              action='store_true',
-                             dest='ignore_nulls',
-                             help='ignore null values (blanks, "None", "NA")',
+                             dest='non_nulls',
+                             help='ignore null values (blanks, "None", "NA", "NULL")',
                              default=False)
+    option_parser.add_option('-l', '--letters-only',
+                             action='store_true',
+                             dest='letters_only',
+                             help='use only values that contain at least one letter of the alphabet',
+                             default=False)
+    option_parser.add_option('-e', '--exclude-columns',
+                             dest='excluded',
+                             help='exclude the comma-separated, zero-based column indices before processing',
+                             default='',
+                             type='string')
 
     (options, args) = option_parser.parse_args()
+
+    try:
+        excluded_columns = {int(index) for index in options.excluded.split(',') if index}
+    except ValueError:
+        print("Badly-formed column index\n")
+        sys.exit("System will exit")
 
     def null_value(value):
         """Returns True if the value is something which ought to be treated as a null."""
         value = value.strip().upper()
         return not value or value == 'NONE' or value == 'NA' or value == 'NULL'
 
-    if options.ignore_nulls:
-        def value_filter(_, value):
-            return null_value(value)
+    if options.letters_only:
+        if options.non_nulls:
+            if excluded_columns:
+                def value_filter(index, value):
+                    return index in excluded_columns or null_value(value) or not any(c.isalpha() for c in value)
+            else:
+                def value_filter(_, value):
+                    return null_value(value) or not any(c.isalpha() for c in value)
+        else:
+            if excluded_columns:
+                def value_filter(index, value):
+                    return index in excluded_columns or not any(c.isalpha() for c in value)
+            else:
+                def value_filter(_, value):
+                    return not any(c.isalpha() for c in value)
     else:
-        value_filter = None
+        if options.non_nulls:
+            if excluded_columns:
+                def value_filter(index, value):
+                    return index in excluded_columns or null_value(value)
+            else:
+                def value_filter(_, value):
+                    return null_value(value)
+        else:
+            if excluded_columns:
+                def value_filter(index, _):
+                    return index in excluded_columns
+            else:
+                value_filter = None
 
     if not options.input:
         print('No data set filename specified, system with exit\n')
