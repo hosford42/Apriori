@@ -7,6 +7,10 @@ Usage:
     $python apriori.py -f DATA_SET.csv -s 0.15 -c 0.6
 """
 
+__author__ = 'Abhinav Saini'
+__maintainer__ = 'Aaron Hosford'
+__version__ = "0.1.0"
+
 import csv
 import logging
 import sys
@@ -206,6 +210,7 @@ def write_rules(path, rules, ordered=False, dialect='excel', *args, **kwargs):
                 writer.writerow(row)
 
 
+# noinspection PyShadowingNames
 def iter_rows(file_obj, ordered=False, ignore=None, dialect='excel', *args, **kwargs):
     """Return an iterator over the rows in the file."""
     reader = csv.reader(file_obj, dialect, *args, **kwargs)
@@ -228,6 +233,7 @@ def iter_rows(file_obj, ordered=False, ignore=None, dialect='excel', *args, **kw
     return (get_record(row) for row in reader if row and (len(row) > 1 or row[0]))
 
 
+# noinspection PyShadowingNames
 def data_from_file(file, ordered=False, ignore=None, dialect='excel', *args, **kwargs):
     """Function which reads from the file and returns a list of records"""
     if isinstance(file, str):
@@ -242,6 +248,7 @@ class FileIterator:
     """File iterator, for efficiently and repeatedly iterating over the records in a potentially large file without
     keeping it loaded in memory."""
 
+    # noinspection PyShadowingNames
     def __init__(self, file_path, ordered=False, ignore=None, dialect='excel', *args, **kwargs):
         self.file_path = file_path
         self.ordered = bool(ordered)
