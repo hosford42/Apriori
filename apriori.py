@@ -58,7 +58,7 @@ def get_initial_itemsets(transactions):
     return item_set
 
 
-def run_apriori(data_iter, min_support, min_confidence):
+def run_apriori(data_iter, min_support=.15, min_confidence=.6):
     """
     Run the apriori algorithm. data_iter is a record iterator
     Return both:
@@ -121,12 +121,12 @@ def run_apriori(data_iter, min_support, min_confidence):
         for item in value:
             for subset in subsets(item):
                 subset = frozenset(subset)
-                remain = item.difference(subset)
+                remain = frozenset(item.difference(subset))
                 if len(remain) > 0:
                     confidence = get_support(item) / get_support(subset)
                     if confidence >= min_confidence:
                         result_rules.append((
-                            (tuple(subset), tuple(remain)),
+                            (subset, remain),
                             confidence)
                         )
 
