@@ -15,50 +15,63 @@ import csv
 import logging
 import sys
 
-from itertools import chain, combinations
 from collections import defaultdict
 
 
-def proper_subsets(arr):
-    """Return non-empty proper subsets of arr"""
-    return chain(*(combinations(arr, i) for i in range(1, len(arr))))
+def count_bits(integer):
+    """Count the number of bits that are set to 1 in the binary representation of the integer."""
+    count = 0
+    while integer:
+        if integer % 2:
+            count += 1
+        integer >>= 1
+    return count
 
 
-def get_items_with_min_support(item_sets, transactions, min_support, item_set_counts):
+def subsets(item_set):
+    """Return all subsets of the item set"""
+    if item_set:
+        if item_set % 2:
+            for subset_base in subsets(item_set >> 1):
+                subset = (subset_base << 1)
+                yield subset
+                yield subset | 1
+        else:
+            for subset_base in subsets(item_set >> 1):
+                yield subset_base << 1
+
+
+def get_items_with_min_support(item_sets, transactions_bitmasks, min_support, item_set_counts):
     """Calculates the support for items in the itemset and returns a subset
     of the itemset each of whose elements satisfies the minimum support."""
 
-    # TODO: If we used bit strings instead of sets, would that speed things up? Maybe numpy can help here...
-    for transaction in transactions:
+    for transaction in transactions_bitmasks:
+        inv_transaction = ~transaction
         for item_set in item_sets:
-            if item_set <= transaction:
+            if not (item_set & inv_transaction):
                 item_set_counts[item_set] += 1
 
-    min_count = min_support * len(transactions)
+    min_count = min_support * len(transactions_bitmasks)
     return [item_set for item_set in item_sets if item_set_counts[item_set] >= min_count]
 
 
 def join_sets(item_sets, length):
     """Join a set with itself and returns the n-element itemsets"""
     result = set()
-    for i in item_sets:
-        for j in item_sets:
-            u = i | j
-            if len(u) == length:
-                result.add(u)
+    for index1, item_set1 in enumerate(item_sets):
+        for index2 in range(index1 + 1, len(item_sets)):
+            item_set2 = item_sets[index2]
+            combined = item_set1 | item_set2
+            if count_bits(combined) == length:
+                result.add(combined)
     return result
 
 
-def get_initial_itemsets(transactions):
+def get_initial_itemsets(bit_count):
     """Return the itemsets of size 1."""
-    all_items = set()
-    for transaction in transactions:
-        all_items |= transaction
-
     item_sets = []
-    for item in all_items:
-        item_sets.append(frozenset({item}))
-
+    for index in range(bit_count):
+        item_sets.append(1 << index)
     return item_sets
 
 
@@ -73,8 +86,15 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6):
     """
     logger = logging.getLogger(__name__)
 
+    logger.info("Converting transactions to bitmasks.")
+    all_items = set()
+    for transaction in transactions:
+        all_items |= transaction
+    converter = BitConverter(all_items)
+    transaction_bitmasks = [converter.to_bits(transaction) for transaction in transactions]
+
     logger.info("Generating initial itemsets of size 1.")
-    item_sets = get_initial_itemsets(transactions)
+    item_sets = get_initial_itemsets(converter.bit_count)
 
     item_set_counts = defaultdict(int)
     large_sets = [[]]
@@ -82,7 +102,7 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6):
     logger.info("Identifying itemsets of size 1 with minimum support.")
     current_length_set = get_items_with_min_support(
         item_sets,
-        transactions,
+        transaction_bitmasks,
         min_support,
         item_set_counts
     )
@@ -98,7 +118,7 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6):
         logger.info("Identifying itemsets of size %s with minimum support.", size)
         current_candidate_set = get_items_with_min_support(
             current_length_set,
-            transactions,
+            transaction_bitmasks,
             min_support,
             item_set_counts
         )
@@ -106,14 +126,14 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6):
         current_length_set = current_candidate_set
 
     result_items = []
-    transaction_count = len(transactions)
+    transaction_count = len(transaction_bitmasks)
     for size, item_sets in enumerate(large_sets):
         if not size:
             continue
         logger.info("Determining support values for itemsets of size %s.", size)
         # support = (# of occurrences) / (total # of transactions)
         result_items.extend(
-            (item_set, item_set_counts[item_set] / transaction_count)
+            (converter.from_bits(item_set), item_set_counts[item_set] / transaction_count)
             for item_set in item_sets
         )
 
@@ -123,16 +143,17 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6):
             continue
         logger.info("Determining rule confidence values for itemsets of size %s.", size)
         for item_set in item_sets:
-            for subset in proper_subsets(item_set):
-                subset = frozenset(subset)
-                remain = frozenset(item_set.difference(subset))
-                if len(remain) > 0:
+            for subset in subsets(item_set):
+                if not subset or subset == item_set:
+                    continue
+                remain = item_set & ~subset
+                if count_bits(remain) > 0:
                     # support = (# of occurrences) / (total # of transactions)
                     # confidence = (support for item_set) / (support for subset)
                     confidence = item_set_counts[item_set] / item_set_counts[subset]
                     if confidence >= min_confidence:
                         result_rules.append((
-                            (subset, remain),
+                            (converter.from_bits(subset), converter.from_bits(remain)),
                             confidence)
                         )
 
@@ -278,6 +299,50 @@ class FileIterator:
                 yield row
 
 
+class BitConverter:
+    """Converts item sets to integer bitmasks and vice versa."""
+
+    def __init__(self, items, frozen=True):
+        self._items = []
+        self._item_index_map = {}
+        self.frozen = frozen
+
+        for item in items:
+            if item not in self._item_index_map:
+                self._item_index_map[item] = len(self._items)
+                self._items.append(item)
+
+        self._bit_count = len(self._items)
+
+    @property
+    def bit_count(self):
+        """The number of bits used to represent the sets."""
+        return self._bit_count
+
+    def to_bits(self, item_set):
+        """Return an integer that represents the given item set."""
+        result = 0
+        for item in item_set:
+            index = self._item_index_map[item]
+            result |= (1 << index)
+        return result
+
+    def from_bits(self, bits):
+        """Return the item set that the given integer represents."""
+        result = set()
+        index = 0
+        while bits:
+            if bits % 2:
+                result.add(self._items[index])
+            index += 1
+            bits >>= 1
+
+        if self.frozen:
+            return frozenset(result)
+        else:
+            return result
+
+
 if __name__ == "__main__":
     from optparse import OptionParser
 
@@ -319,11 +384,6 @@ if __name__ == "__main__":
                              help='exclude the comma-separated, zero-based column indices before processing',
                              default='',
                              type='string')
-    option_parser.add_option('-m', '--in-memory',
-                             action='store_true',
-                             dest='in_memory',
-                             help='load data to memory, rather than reading it from file repeatedly',
-                             default=False)
     option_parser.add_option('-i', '--itemsets-file',
                              dest='itemsets',
                              help='filename where itemsets are saved (csv format)',
@@ -380,8 +440,8 @@ if __name__ == "__main__":
         print('No data set filename specified, system with exit\n')
         sys.exit('System will exit')
 
-    if options.in_memory or options.input is None:
-        transactions_iterable = data_from_file(options.input or sys.stdin, options.ordered, value_filter)
+    if options.input is None:
+        transactions_iterable = data_from_file(sys.stdin, options.ordered, value_filter)
     else:
         transactions_iterable = FileIterator(options.input, options.ordered, value_filter)
 
