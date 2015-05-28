@@ -19,9 +19,9 @@ from itertools import chain, combinations
 from collections import defaultdict
 
 
-def proper_subsets(arr):
+def proper_subsets(item_set):
     """Return non-empty proper subsets of arr"""
-    return chain(*(combinations(arr, i) for i in range(1, len(arr))))
+    return chain(*(combinations(item_set, i) for i in range(1, len(item_set))))
 
 
 def get_items_with_min_support(item_sets, transactions, min_support, item_set_counts):
@@ -145,7 +145,7 @@ def itemset_to_string(itemset, ordered=False):
     if ordered:
         return ', '.join(str(index) + ': ' + value for index, value in sorted(itemset))
     else:
-        return ', '.join(value for value in sorted(itemset))
+        return ', '.join(str(value) for value in sorted(itemset))
 
 
 # noinspection PyShadowingNames
@@ -179,12 +179,12 @@ def write_itemsets(path, itemsets, ordered=False, dialect='excel', *args, **kwar
         if ordered:
             for itemset, support in sorted(itemsets, key=lambda pair: (pair[-1], pair), reverse=True):
                 row = [support, len(itemset)]
-                row.extend(str(index) + ': ' + value for index, value in sorted(itemset))
+                row.extend(str(index) + ': ' + str(value) for index, value in sorted(itemset))
                 writer.writerow(row)
         else:
             for itemset, support in sorted(itemsets, key=lambda pair: (pair[-1], pair), reverse=True):
                 row = [support, len(itemset)]
-                row.extend(sorted(itemset))
+                row.extend(str(item) for item in sorted(itemset))
                 writer.writerow(row)
 
 
@@ -201,18 +201,18 @@ def write_rules(path, rules, ordered=False, dialect='excel', *args, **kwargs):
         if ordered:
             for (condition, prediction), confidence in sorted(rules, key=lambda pair: (pair[-1], pair), reverse=True):
                 row = [confidence, len(condition)]
-                row.extend(str(index) + ': ' + value for index, value in sorted(condition))
+                row.extend(str(index) + ': ' + str(value) for index, value in sorted(condition))
                 row.append('=>')
                 row.append(len(prediction))
-                row.extend(str(index) + ': ' + value for index, value in sorted(prediction))
+                row.extend(str(index) + ': ' + str(value) for index, value in sorted(prediction))
                 writer.writerow(row)
         else:
             for (condition, prediction), confidence in sorted(rules, key=lambda pair: (pair[-1], pair), reverse=True):
                 row = [confidence, len(condition)]
-                row.extend(sorted(condition))
+                row.extend(str(item) for item in sorted(condition))
                 row.append('=>')
                 row.append(len(prediction))
-                row.extend(sorted(prediction))
+                row.extend(str(item) for item in sorted(prediction))
                 writer.writerow(row)
 
 
