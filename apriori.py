@@ -19,111 +19,117 @@ from itertools import chain, combinations
 from collections import defaultdict
 
 
-def subsets(arr):
-    """Return non-empty subsets of arr"""
-    return chain(*(combinations(arr, i + 1) for i in range(len(arr))))
+def proper_subsets(arr):
+    """Return non-empty proper subsets of arr"""
+    return chain(*(combinations(arr, i) for i in range(1, len(arr))))
 
 
-def get_items_with_min_support(item_set, transactions, min_support, freq_set):
+def get_items_with_min_support(item_sets, transactions, min_support, item_set_counts):
     """Calculates the support for items in the itemset and returns a subset
     of the itemset each of whose elements satisfies the minimum support."""
-    results = set()
-    local_set = defaultdict(int)
 
-    for item in item_set:
-        for transaction in transactions:
-            if item <= transaction:
-                freq_set[item] += 1
-                local_set[item] += 1
+    # TODO: If we used bit strings instead of sets, would that speed things up? Maybe numpy can help here...
+    for transaction in transactions:
+        for item_set in item_sets:
+            if item_set <= transaction:
+                item_set_counts[item_set] += 1
 
-    for item, count in local_set.items():
-        support = count / len(transactions)
-
-        if support >= min_support:
-            results.add(item)
-
-    return results
+    min_count = min_support * len(transactions)
+    return [item_set for item_set in item_sets if item_set_counts[item_set] >= min_count]
 
 
-def join_set(item_set, length):
+def join_sets(item_sets, length):
     """Join a set with itself and returns the n-element itemsets"""
-    return {i.union(j) for i in item_set for j in item_set if len(i.union(j)) == length}
+    result = set()
+    for i in item_sets:
+        for j in item_sets:
+            u = i | j
+            if len(u) == length:
+                result.add(u)
+    return result
 
 
 def get_initial_itemsets(transactions):
-    item_set = set()
+    """Return the itemsets of size 1."""
+    all_items = set()
     for transaction in transactions:
-        for item in transaction:
-            item_set.add(frozenset([item]))              # Generate 1-itemsets
-    return item_set
+        all_items |= transaction
+
+    item_sets = []
+    for item in all_items:
+        item_sets.append(frozenset({item}))
+
+    return item_sets
 
 
-def run_apriori(data_iter, min_support=.15, min_confidence=.6):
+def run_apriori(transactions, min_support=.15, min_confidence=.6):
     """
-    Run the apriori algorithm. data_iter is a record iterator
+    Run the apriori algorithm. transactions is a sequence of records which can be iterated over repeatedly,
+    where each record is a set of items.
+
     Return both:
-     - items (tuple, support)
+     - itemsets (tuple, support)
      - rules ((pre_tuple, post_tuple), confidence)
     """
     logger = logging.getLogger(__name__)
 
-    logger.info("Getting initial itemsets")
-    item_set = get_initial_itemsets(data_iter)
+    logger.info("Generating initial itemsets of size 1.")
+    item_sets = get_initial_itemsets(transactions)
 
-    freq_set = defaultdict(int)
-    large_set = {}
-    # Global dictionary which stores (key=n-itemSets,value=support)
-    # which satisfy min_support
+    item_set_counts = defaultdict(int)
+    large_sets = [[]]
 
-    # Dictionary which stores Association Rules
-
-    logger.info("Getting items with minimum support for k = 1")
+    logger.info("Identifying itemsets of size 1 with minimum support.")
     current_length_set = get_items_with_min_support(
-        item_set,
-        data_iter,
+        item_sets,
+        transactions,
         min_support,
-        freq_set
+        item_set_counts
     )
 
-    k = 2
+    size = 1
     while current_length_set:
-        large_set[k-1] = current_length_set
-        logger.info("Joining subsets for k = %s", k)
-        current_length_set = join_set(current_length_set, k)
-        logger.info("Getting items with minimum support for k = %s", k)
+        large_sets.append(current_length_set)
+        size += 1
+
+        logger.info("Generating itemsets of size %s.", size)
+        current_length_set = join_sets(current_length_set, size)
+
+        logger.info("Identifying itemsets of size %s with minimum support.", size)
         current_candidate_set = get_items_with_min_support(
             current_length_set,
-            data_iter,
+            transactions,
             min_support,
-            freq_set
+            item_set_counts
         )
-        current_length_set = current_candidate_set
-        k += 1
 
-    # noinspection PyShadowingNames
-    def get_support(item):
-        """Local function which returns the support of an item"""
-        return freq_set[item] / len(data_iter)
+        current_length_set = current_candidate_set
 
     result_items = []
-    for key, value in large_set.items():
-        logger.info("Determining item support values for k = %s", key)
-        result_items.extend([
-            (tuple(item), get_support(item))
-            for item in value
-        ])
+    transaction_count = len(transactions)
+    for size, item_sets in enumerate(large_sets):
+        if not size:
+            continue
+        logger.info("Determining support values for itemsets of size %s.", size)
+        # support = (# of occurrences) / (total # of transactions)
+        result_items.extend(
+            (item_set, item_set_counts[item_set] / transaction_count)
+            for item_set in item_sets
+        )
 
     result_rules = []
-    for key, value in large_set.items():
-        if key < 2:
+    for size, item_sets in enumerate(large_sets):
+        if size < 2:
             continue
-        logger.info("Rule confidence values for k = %s", key)
-        for item in value:
-            for subset in subsets(item):
+        logger.info("Determining rule confidence values for itemsets of size %s.", size)
+        for item_set in item_sets:
+            for subset in proper_subsets(item_set):
                 subset = frozenset(subset)
-                remain = frozenset(item.difference(subset))
+                remain = frozenset(item_set.difference(subset))
                 if len(remain) > 0:
-                    confidence = get_support(item) / get_support(subset)
+                    # support = (# of occurrences) / (total # of transactions)
+                    # confidence = (support for item_set) / (support for subset)
+                    confidence = item_set_counts[item_set] / item_set_counts[subset]
                     if confidence >= min_confidence:
                         result_rules.append((
                             (subset, remain),
