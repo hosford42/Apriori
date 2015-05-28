@@ -13,7 +13,6 @@ __version__ = "0.1.0"
 
 import csv
 import logging
-import sys
 
 from itertools import chain, combinations
 from collections import defaultdict
@@ -279,6 +278,8 @@ class FileIterator:
 
 
 if __name__ == "__main__":
+    import sys
+
     from optparse import OptionParser
 
     # TODO: Add command-line options to control log level, format, and path.
