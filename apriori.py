@@ -18,18 +18,10 @@ import sys
 from collections import defaultdict
 from itertools import combinations, chain
 
+from hashable_arrays import BitArray
+
 
 # TODO: I think I need to switch from ints to actual bitarrays of some sort. It's taking much longer to run like this.
-
-
-def count_bits(integer):
-    """Count the number of bits that are set to 1 in the binary representation of the integer."""
-    count = 0
-    while integer:
-        if integer % 2:
-            count += 1
-        integer >>= 1
-    return count
 
 
 def subsets(item_set):
@@ -45,8 +37,11 @@ def subsets(item_set):
 def get_initial_item_sets(bit_count):
     """Return the item sets of size 1."""
     item_sets = []
+    bit_list = [False] * bit_count
     for index in range(bit_count):
-        item_sets.append(1 << index)
+        bit_list[index] = True
+        item_sets.append(BitArray(bit_list))
+        bit_list[index] = False
     return item_sets
 
 
@@ -57,7 +52,7 @@ def join_sets(item_sets, length):
         for index2 in range(index1 + 1, len(item_sets)):
             item_set2 = item_sets[index2]
             combined = item_set1 | item_set2
-            if count_bits(combined) == length:
+            if combined.bit_count() == length:
                 result.add(combined)
     return result
 
@@ -147,8 +142,8 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6):
             for subset in subsets(item_set):
                 if not subset or subset == item_set:
                     continue
-                remain = item_set & ~subset
-                if count_bits(remain) > 0:
+                remain = item_set - subset
+                if remain.bit_length() > 0:
                     # support = (# of occurrences) / (total # of transactions)
                     # confidence = (support for item_set) / (support for subset)
                     confidence = item_set_counts[item_set] / item_set_counts[subset]
@@ -298,6 +293,7 @@ class FileIterator:
                 yield row
 
 
+# TODO: Check out the bitsets library, available via pip. It does pretty much the same thing.
 class BitConverter:
     """Converts item sets to integer bitmasks and vice versa."""
 
@@ -338,21 +334,14 @@ class BitConverter:
 
     def to_bits(self, item_set):
         """Return an integer that represents the given item set."""
-        result = 0
-        for item in item_set:
-            index = self._item_index_map[item]
-            result |= (1 << index)
-        return result
+        return BitArray.from_indices((self._item_index_map[item] for item in item_set), self._bit_count)
 
     def from_bits(self, bits):
         """Return the item set that the given integer represents."""
         result = set()
-        index = 0
-        while bits:
-            if bits % 2:
+        for index, bit in enumerate(bits):
+            if bit:
                 result.add(self._items[index])
-            index += 1
-            bits >>= 1
 
         if self.frozen:
             return frozenset(result)
