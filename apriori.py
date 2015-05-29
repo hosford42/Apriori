@@ -13,8 +13,9 @@ __version__ = "0.1.0"
 
 import csv
 import logging
+import multiprocessing
 
-from itertools import chain, combinations
+from itertools import chain, combinations, cycle
 from collections import defaultdict
 
 
@@ -23,28 +24,52 @@ def proper_subsets(item_set):
     return chain(*(combinations(item_set, i) for i in range(1, len(item_set))))
 
 
-def get_items_with_min_support(item_sets, transactions, min_support, item_set_counts):
+def issubset(item_set_transaction):
+    item_set, transaction = item_set_transaction
+    return item_set if item_set.issubset(transaction) else None
+    # return item_set <= transaction
+
+def get_items_with_min_support(item_sets, transactions, min_support, item_set_counts, pool=None):
     """Calculates the support for items in the itemset and returns a subset
     of the itemset each of whose elements satisfies the minimum support."""
 
-    # TODO: If we used bit strings instead of sets, would that speed things up? Maybe numpy can help here...
-    for transaction in transactions:
-        for item_set in item_sets:
-            if item_set <= transaction:
-                item_set_counts[item_set] += 1
+    if pool:
+        for transaction in transactions:
+            for item_set in pool.imap_unordered(issubset, zip(item_sets, cycle([transaction]))):
+                if item_set is not None:
+                    item_set_counts[item_set] += 1
+    else:
+        for transaction in transactions:
+            for item_set in item_sets:
+                if item_set <= transaction:
+                    item_set_counts[item_set] += 1
 
     min_count = min_support * len(transactions)
     return [item_set for item_set in item_sets if item_set_counts[item_set] >= min_count]
 
 
-def join_sets(item_sets, length):
+def join_pair(i_j_length):
+    i, j, length = i_j_length
+    u = i | j
+    if len(u) == length:
+        return u
+    else:
+        return None
+
+def join_sets(item_sets, length, pool=None):
     """Join a set with itself and returns the n-element itemsets"""
     result = set()
-    for i in item_sets:
-        for j in item_sets:
-            u = i | j
-            if len(u) == length:
-                result.add(u)
+    if pool:
+        for i in item_sets:
+            for u in pool.imap_unordered(join_pair, zip(cycle([i]), item_sets, cycle([length]))):
+                if u is not None:
+                    result.add(u)
+    else:
+        for i in item_sets:
+            for j in item_sets:
+                u = i | j
+                if len(u) == length:
+                    result.add(u)
     return result
 
 
@@ -52,7 +77,7 @@ def get_initial_itemsets(transactions):
     """Return the itemsets of size 1."""
     all_items = set()
     for transaction in transactions:
-        all_items |= transaction
+        all_items.update(transaction)
 
     item_sets = []
     for item in all_items:
@@ -61,7 +86,7 @@ def get_initial_itemsets(transactions):
     return item_sets
 
 
-def run_apriori(transactions, min_support=.15, min_confidence=.6):
+def run_apriori(transactions, min_support=.15, min_confidence=.6, use_pool=True):
     """
     Run the apriori algorithm. transactions is a sequence of records which can be iterated over repeatedly,
     where each record is a set of items.
@@ -71,6 +96,12 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6):
      - rules ((pre_tuple, post_tuple), confidence)
     """
     logger = logging.getLogger(__name__)
+
+    if use_pool:
+        logger.info("Using process pool.")
+        pool = multiprocessing.Pool()
+    else:
+        pool = None
 
     logger.info("Generating initial itemsets of size 1.")
     item_sets = get_initial_itemsets(transactions)
@@ -83,7 +114,8 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6):
         item_sets,
         transactions,
         min_support,
-        item_set_counts
+        item_set_counts,
+        pool
     )
 
     size = 1
@@ -99,7 +131,8 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6):
             current_length_set,
             transactions,
             min_support,
-            item_set_counts
+            item_set_counts,
+            pool
         )
 
         current_length_set = current_candidate_set
