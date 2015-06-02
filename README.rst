@@ -7,8 +7,8 @@ List of files
 2. INTEGRATED-DATASET.csv
 3. README(this file)
 
-The dataset is a copy of the “Online directory of certified businesses with a detailed profile” file from the Small Business Services (SBS) 
-dataset in the `NYC Open Data Sets <http://nycopendata.socrata.com/>`_
+The dataset is a copy of the “Online directory of certified businesses with a detailed profile” file from the Small
+Business Services (SBS) dataset in the `NYC Open Data Sets <http://nycopendata.socrata.com/>`_
 
 Usage
 -----
