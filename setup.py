@@ -2,9 +2,8 @@
 
 """Setup script for Apriori."""
 
-# Package author and maintainer
-__author__ = 'Abhinav Saini'
-__maintainer__ = 'Aaron Hosford'
+# For full authorship and copyright information, see the mit-license file
+__author__ = 'Aaron Hosford'
 
 from setuptools import setup
 from os import path
@@ -16,9 +15,6 @@ here = path.abspath(path.dirname(__file__))
 long_description = """
 Implements the Apriori algorithm for itemset and association rule learning.
 See http://en.wikipedia.org/wiki/Apriori_algorithm for full a description.
-
-Original Author: Abhinav Saini
-Fork Maintainer: Aaron Hosford
 """
 
 setup(
@@ -28,8 +24,7 @@ setup(
     long_description=long_description,
     url='https://github.com/hosford42/xcs',
     author=__author__,
-    maintainer=__maintainer__,
-    maintainer_email='hosford42@gmail.com',
+    author_email='hosford42@gmail.com',
     license='MIT',
 
     # See https://pypi.python.org/pypi?%3Aaction=list_classifiers
