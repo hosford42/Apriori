@@ -7,8 +7,8 @@ Usage:
     $python apriori.py -f DATA_SET.csv -s 0.15 -c 0.6
 """
 
-__author__ = 'Abhinav Saini'
-__maintainer__ = 'Aaron Hosford'
+# For full authorship and copyright information, see the mit-license file
+__author__ = 'Aaron Hosford'
 __version__ = "0.1.0"
 
 import csv
