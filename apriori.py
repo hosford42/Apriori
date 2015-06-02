@@ -48,6 +48,25 @@ def join_sets(item_sets, length):
     return result
 
 
+# IDEA:
+#   - Partition the transactions into disjoint subsets.
+#   - Multiple processes, local or on other machines, each running Apriori on one of the subsets.
+#   - Each process is wrapped in a manager object of some sort that conveys data and watches the
+#     process to determine when it is complete, hiding implementation details so we don't have to
+#     worry about whether the process is local or not.
+#   - The Merge object waits on processes to complete. Then it runs the Apriori algorithm on the
+#     full data set, but instead of simply joining item sets as in join_sets(), the Merge object
+#     also filters out any item set that doesn't appear in the results from at least one of the
+#     subsets. In other words, it pre-filters the candidate set. This should work reliably
+#     because in order for the support of an item set within a subset to drop below the minimum
+#     density, those records must be moved to another subset, pushing its density above the
+#     threshold.
+class AprioriMerge:
+
+    def __init__(self):
+
+
+
 def get_initial_itemsets(transactions):
     """Return the itemsets of size 1."""
     all_items = set()
@@ -61,7 +80,7 @@ def get_initial_itemsets(transactions):
     return item_sets
 
 
-def run_apriori(transactions, min_support=.15, min_confidence=.6):
+def run_apriori(transactions, min_support=.15, min_confidence=.6, get_candidates=join_sets):
     """
     Run the apriori algorithm. transactions is a sequence of records which can be iterated over repeatedly,
     where each record is a set of items.
@@ -79,7 +98,7 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6):
     large_sets = [[]]
 
     logger.info("Identifying itemsets of size 1 with minimum support.")
-    current_length_set = get_items_with_min_support(
+    length_set = get_items_with_min_support(
         item_sets,
         transactions,
         min_support,
@@ -87,22 +106,20 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6):
     )
 
     size = 1
-    while current_length_set:
-        large_sets.append(current_length_set)
+    while length_set:
+        large_sets.append(length_set)
         size += 1
 
         logger.info("Generating itemsets of size %s.", size)
-        current_length_set = join_sets(current_length_set, size)
+        candidate_set = get_candidates(length_set, size)
 
         logger.info("Identifying itemsets of size %s with minimum support.", size)
-        current_candidate_set = get_items_with_min_support(
-            current_length_set,
+        length_set = get_items_with_min_support(
+            candidate_set,
             transactions,
             min_support,
             item_set_counts
         )
-
-        current_length_set = current_candidate_set
 
     result_items = []
     transaction_count = len(transactions)
