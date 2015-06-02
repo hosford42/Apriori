@@ -1,5 +1,5 @@
 """
-Description     : Simple Python implementation of the Apriori Algorithm
+Description: Python implementation of the Apriori Algorithm
 
 Usage:
     $python apriori.py -f DATA_SET.csv -s minSupport  -c minConfidence
