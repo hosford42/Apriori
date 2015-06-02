@@ -1,0 +1,80 @@
+Sorry in advance for the plain ASCII mathematics... Also, please take note
+that this proof is high-level and has not been checked for correctness.
+    --Aaron
+
+
+SET NOTATION:
+    <=      Subset-of operator
+    !=      Set inequality
+    &       Set intersection
+    +       Set union
+    -       Set difference
+    0       Empty set
+    |S|     The size of set S
+
+
+Let R and U be sets, with R <= U and U != 0
+Define the density of R in S, d_R(S) df.= |S & R| / |S| for S <= U
+
+
+Let X <= U and Y = U - X
+(That is, X and Y form a partition of U)
+Prove that max(d_R(X), d_R(Y)) >= d_R(U)
+
+    Suppose d_R(X) < d_R(U) and d_R(Y) < d_R(U)
+        
+        d_R(X) = |X & R| / |X| < d_R(U) = |U & R| / |U| = |R| / |U|
+        
+        |X & R| / |R| < |X| / |U|
+        
+        Likewise, |Y & R| / |R| < |Y| / |U|
+        
+        |X & R| + |Y & R| < |X| / |U| + |Y| / |U| = (|X| + |Y|) / |U|)
+        
+        Since X and Y are disjoint, so are X & R and Y & R
+        
+        Therefore, |(X + Y) & R| < |X + Y| / |U|
+        
+        |U & R| < |U| / |U|
+        
+        |R| < 1
+        
+        |R| = 0
+        
+        R = 0
+        
+     Therefore, either max(d_R(X), d_R(Y)) >= d_R(U), or R = 0
+     
+     Let R = 0
+     
+         For all S, d_R(S) = |S & R| / |U| = 0
+         
+         Thus max(d_R(X), d_R(Y)) = d_R(U) = 0
+     
+     Therefore, for all X, Y, R, and U satisfying the given conditions, max(d_R(X), d_R(Y)) >= d_R(U)
+    
+    
+Let P be a partition of U
+Prove that max(d_R(S) for S in P) >= d_R(U)
+
+    Let X in P and Y = union(S in P where S != X)
+    
+        If d_R(X) >= d_R(U), we are done
+        
+        Otherwise, by the lemma above, d_R(Y) >= d_R(U)
+        
+        Since P is a partition of U and U - X = Y, P - {X} is a partition of Y
+        
+        Thus the proof for partition P of size k reduces to a proof for partition P - {X} of size k - 1
+        
+        Base cases:
+            
+            |P| = 0
+                
+                This is impossible, since |U| > 0 by definition.
+            
+            |P| = 1
+                
+                Then P = {U} and max(d_R(S) for S in U) = d_R(U)
+            
+        Therefore, by induction, max(d_R(S) for S in U) >= d_R(U)
