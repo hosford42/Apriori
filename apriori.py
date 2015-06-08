@@ -13,6 +13,7 @@ __version__ = "0.1.0"
 
 import csv
 import logging
+import multiprocessing
 
 from itertools import chain, combinations
 from collections import defaultdict
@@ -27,7 +28,6 @@ def get_items_with_min_support(item_sets, transactions, min_support, item_set_co
     """Calculates the support for items in the itemset and returns a subset
     of the itemset each of whose elements satisfies the minimum support."""
 
-    # TODO: If we used bit strings instead of sets, would that speed things up? Maybe numpy can help here...
     for transaction in transactions:
         for item_set in item_sets:
             if item_set <= transaction:
@@ -48,25 +48,6 @@ def join_sets(item_sets, length):
     return result
 
 
-# IDEA:
-#   - Partition the transactions into disjoint subsets.
-#   - Multiple processes, local or on other machines, each running Apriori on one of the subsets.
-#   - Each process is wrapped in a manager object of some sort that conveys data and watches the
-#     process to determine when it is complete, hiding implementation details so we don't have to
-#     worry about whether the process is local or not.
-#   - The Merge object waits on processes to complete. Then it runs the Apriori algorithm on the
-#     full data set, but instead of simply joining item sets as in join_sets(), the Merge object
-#     also filters out any item set that doesn't appear in the results from at least one of the
-#     subsets. In other words, it pre-filters the candidate set. This should work reliably
-#     because in order for the support of an item set within a subset to drop below the minimum
-#     density, those records must be moved to another subset, pushing its density above the
-#     threshold.
-class AprioriMerge:
-
-    def __init__(self):
-
-
-
 def get_initial_itemsets(transactions):
     """Return the itemsets of size 1."""
     all_items = set()
@@ -80,7 +61,7 @@ def get_initial_itemsets(transactions):
     return item_sets
 
 
-def run_apriori(transactions, min_support=.15, min_confidence=.6, get_candidates=join_sets):
+def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, get_candidates=join_sets):
     """
     Run the apriori algorithm. transactions is a sequence of records which can be iterated over repeatedly,
     where each record is a set of items.
@@ -89,6 +70,8 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6, get_candidates
      - itemsets (tuple, support)
      - rules ((pre_tuple, post_tuple), confidence)
     """
+    assert sets or rules
+
     logger = logging.getLogger(__name__)
 
     logger.info("Generating initial itemsets of size 1.")
@@ -121,39 +104,137 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6, get_candidates
             item_set_counts
         )
 
-    result_items = []
-    transaction_count = len(transactions)
-    for size, item_sets in enumerate(large_sets):
-        if not size:
-            continue
-        logger.info("Determining support values for itemsets of size %s.", size)
-        # support = (# of occurrences) / (total # of transactions)
-        result_items.extend(
-            (item_set, item_set_counts[item_set] / transaction_count)
-            for item_set in item_sets
-        )
+    if sets:
+        result_items = []
+        transaction_count = len(transactions)
+        for size, item_sets in enumerate(large_sets):
+            if not size:
+                continue
+            logger.info("Determining support values for itemsets of size %s.", size)
+            # support = (# of occurrences) / (total # of transactions)
+            result_items.extend(
+                (item_set, item_set_counts[item_set] / transaction_count)
+                for item_set in item_sets
+            )
 
-    result_rules = []
-    for size, item_sets in enumerate(large_sets):
-        if size < 2:
-            continue
-        logger.info("Determining rule confidence values for itemsets of size %s.", size)
-        for item_set in item_sets:
-            for subset in proper_subsets(item_set):
-                subset = frozenset(subset)
-                remain = frozenset(item_set.difference(subset))
-                if len(remain) > 0:
-                    # support = (# of occurrences) / (total # of transactions)
-                    # confidence = (support for item_set) / (support for subset)
-                    confidence = item_set_counts[item_set] / item_set_counts[subset]
-                    if confidence >= min_confidence:
-                        result_rules.append((
-                            (subset, remain),
-                            confidence)
-                        )
+    if rules:
+        result_rules = []
+        for size, item_sets in enumerate(large_sets):
+            if size < 2:
+                continue
+            logger.info("Determining rule confidence values for itemsets of size %s.", size)
+            for item_set in item_sets:
+                for subset in proper_subsets(item_set):
+                    subset = frozenset(subset)
+                    remain = frozenset(item_set.difference(subset))
+                    if len(remain) > 0:
+                        # support = (# of occurrences) / (total # of transactions)
+                        # confidence = (support for item_set) / (support for subset)
+                        confidence = item_set_counts[item_set] / item_set_counts[subset]
+                        if confidence >= min_confidence:
+                            result_rules.append((
+                                (subset, remain),
+                                confidence)
+                            )
 
     logger.info("Processing complete.")
-    return result_items, result_rules
+
+    if sets:
+        if rules:
+            return result_items, result_rules
+    else:
+        return result_rules
+
+
+# IDEA:
+#   - Partition the transactions into disjoint subsets.
+#   - Multiple processes, local or on other machines, each running Apriori on one of the subsets.
+#   - Each process is wrapped in a manager object of some sort that conveys data and watches the
+#     process to determine when it is complete, hiding implementation details so we don't have to
+#     worry about whether the process is local or not.
+#   - The Merge object waits on processes to complete. Then it runs the Apriori algorithm on the
+#     full data set, but instead of simply joining item sets as in join_sets(), the Merge object
+#     also filters out any item set that doesn't appear in the results from at least one of the
+#     subsets. In other words, it pre-filters the candidate set. This should work reliably
+#     because in order for the support of an item set within a subset to drop below the minimum
+#     density, those records must be moved to another subset, pushing its density above the
+#     threshold.
+class AprioriMerge:
+
+    def __init__(self, candidates):
+        self.candidates = frozenset(candidates)
+
+    def get_candidates(self, length_set, size):
+        """Finds each pair of sets in length set for which the union is one of the previously identified candidates."""
+        return {item_set for item_set in join_sets(length_set, size) if item_set in self.candidates}
+
+    def __call__(self, transactions, min_support=.15, min_confidence=.6, sets=True, rules=True):
+        return run_apriori(transactions, min_support, min_confidence, sets, rules, get_candidates=self.get_candidates)
+
+
+def run_distributed_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, chunk_size=2500, dispatcher=None):
+    if dispatcher is None:
+        dispatcher = LocalDispatcher(multiprocessing.cpu_count())
+    chunk = []
+    candidates = set()
+    for index, transaction in enumerate(transactions):
+        if chunk and not index % chunk_size:
+            print("Dispatching chunk of length", chunk_size)
+            dispatcher.dispatch(chunk, min_support, min_confidence, rules=False)
+            chunk = []
+        for results in dispatcher.results():
+            print("Processing results of length", len(results))
+            candidates.update(results)
+        chunk.append(transaction)
+    if chunk:
+        print("Dispatching chunk of length", chunk_size)
+        dispatcher.dispatch(chunk, min_support, min_confidence, rules=False)
+    while dispatcher.more():
+        dispatcher.wait()
+        for results in dispatcher.results():
+            print("Processing results of length", len(results))
+            candidates.update(results)
+    print("Total candidates identified:", len(candidates))
+    merger = AprioriMerge(candidates)
+    return merger(transactions, min_support, min_confidence, sets, rules)
+
+
+def _execute(results_queue, args, kwargs):
+    results_queue.put_nowait(run_apriori(*args, **kwargs))
+
+class LocalDispatcher:
+
+    def __init__(self, max_running=None):
+        self._manager = multiprocessing.Manager()
+        self._results_queue = self._manager.Queue()
+        self._pool = multiprocessing.Pool()
+        self._running = []
+        self._counter = 0
+        self._max_running = max_running
+
+    def dispatch(self, *args, **kwargs):
+        if self._max_running:
+            while len(self._running) >= self._max_running:
+                self.wait()
+        self._counter += 1
+        self._running.append(self._pool.apply_async(_execute, (self._results_queue, args, kwargs)))
+
+    def wait(self):
+        for async_result in self._running:
+            if async_result.ready():
+                async_result.get(0)
+                self._running.remove(async_result)
+                break
+            else:
+                async_result.wait(1)
+
+    def results(self):
+        while not self._results_queue.empty():
+            self._counter -= 1
+            yield self._results_queue.get_nowait()
+
+    def more(self):
+        return self._counter > 0
 
 
 def itemset_to_string(itemset, ordered=False):
