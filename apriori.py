@@ -19,6 +19,13 @@ from itertools import chain, combinations
 from collections import defaultdict
 
 
+try:
+    # Install PyFIM from http://www.borgelt.net/pyfim.html
+    import fim
+except ImportError:
+    fim = None
+
+
 def proper_subsets(item_set):
     """Return non-empty proper subsets of arr"""
     return chain(*(combinations(item_set, i) for i in range(1, len(item_set))))
@@ -146,6 +153,61 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rul
         return result_rules
 
 
+if fim is None:
+    _bottom_level_apriori = run_apriori
+else:
+    def _bottom_level_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rules=True):
+        """
+        Run the apriori algorithm. transactions is a sequence of records which can be iterated over repeatedly,
+        where each record is a set of items.
+
+        Return both:
+         - itemsets (tuple, support)
+         - rules ((pre_tuple, post_tuple), confidence)
+        """
+        assert sets or rules
+
+        if sets:
+            results = fim.apriori(transactions, target='s', supp=min_support*100, report='s', zmax=6)
+
+            # Results come out of fim as (item_set, (support,)), but we want (item_set, support). This fixes it in-
+            # place so we don't use excessive memory.
+            for index, pair in enumerate(results):
+                results[index] = (pair[0], pair[1][0])
+
+            if not rules:
+                return results
+
+            # Compute rules and their confidences...
+            support_values = {frozenset(item_set): support for item_set, support in results}
+            result_rules = []
+            for index, (item_set, support) in results:
+                if len(item_set) < 2:
+                    continue
+                item_set = frozenset(item_set)
+                for subset in proper_subsets(item_set):
+                    subset = frozenset(subset)
+                    remain = item_set.difference(subset)
+                    if len(remain) > 0:
+                        # confidence = (support for item_set) / (support for subset)
+                        confidence = support_values[item_set] / support_values[subset] # TODO: Is this going to work consistently?
+                        if confidence >= min_confidence:
+                            result_rules.append((
+                                (subset, remain),
+                                confidence)
+                            )
+
+            return results, result_rules
+        else:
+            results = fim.apriori(transactions, target='r', supp=min_support*100, eval='c', thresh=min_confidence*100, report='c', zmax=6)
+
+            # Results come out of fim as (prediction, condition, (confidence,)), but we want ((condition, prediction),
+            # confidence). This fixes it in-place so we don't use excessive memory.
+            for index, triple in results:
+                results[index] = ((triple[1], triple[0]), triple[2][0])
+
+            return results
+
 # IDEA:
 #   - Partition the transactions into disjoint subsets.
 #   - Multiple processes, local or on other machines, each running Apriori on one of the subsets.
@@ -172,7 +234,7 @@ class AprioriMerge:
         return run_apriori(transactions, min_support, min_confidence, sets, rules, get_candidates=self.get_candidates)
 
 
-def run_distributed_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, chunk_size=2500, dispatcher=None):
+def run_distributed_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, chunk_size=5000, dispatcher=None):
     if dispatcher is None:
         dispatcher = LocalDispatcher(multiprocessing.cpu_count())
     chunk = []
@@ -200,7 +262,8 @@ def run_distributed_apriori(transactions, min_support=.15, min_confidence=.6, se
 
 
 def _execute(results_queue, args, kwargs):
-    results_queue.put_nowait(run_apriori(*args, **kwargs))
+    results_queue.put_nowait(_bottom_level_apriori(*args, **kwargs))
+
 
 class LocalDispatcher:
 
