@@ -68,7 +68,7 @@ def get_initial_itemsets(transactions):
     return item_sets
 
 
-def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, get_candidates=join_sets):
+def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, get_candidates=join_sets, generational_max=None):
     """
     Run the apriori algorithm. transactions is a sequence of records which can be iterated over repeatedly,
     where each record is a set of items.
@@ -97,6 +97,13 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rul
 
     size = 1
     while length_set:
+        print("size:", size)
+        print("count:", len(length_set))
+
+        if generational_max and len(length_set) > generational_max:
+            length_set.sort(key=item_set_counts.get, reverse=True)
+            length_set = length_set[:generational_max]
+
         large_sets.append(length_set)
         size += 1
 
