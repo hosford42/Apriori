@@ -14,6 +14,7 @@ __version__ = "0.1.0"
 import csv
 import logging
 import multiprocessing
+import traceback
 
 from itertools import chain, combinations
 
@@ -179,7 +180,13 @@ class AprioriMerge:
 
     def get_candidates(self, length_set, size):
         """Finds each pair of sets in length set for which the union is one of the previously identified candidates."""
-        return {item_set for item_set in join_sets(length_set, size) if item_set in self.candidates}
+        # if size <= 2:
+        #     results = {item_set for item_set in join_sets(length_set, size)}
+        # else:
+        #     results = {item_set for item_set in join_sets(length_set, size) if item_set in }
+        # results.update(item_set for item_set in self.candidates if len(item_set) == size)
+        # return results
+        return {item_set for item_set in self.candidates if len(item_set) == size}
 
     def __call__(self, transactions, min_support=.15, min_confidence=.6, sets=True, rules=True):
         return run_apriori(transactions, min_support, min_confidence, sets, rules, get_candidates=self.get_candidates)
@@ -213,8 +220,13 @@ def run_distributed_apriori(transactions, min_support=.15, min_confidence=.6, se
 
 
 def _execute(results_queue, args, kwargs):
-    results_queue.put(run_apriori(*args, **kwargs))
-
+    try:
+        results = run_apriori(*args, **kwargs)
+        print("Queueing", len(results), "results")
+        results_queue.put({item_set for item_set, score in results})
+        print("Successfully queued", len(results), "results.")
+    except:
+        traceback.print_exc()
 
 class LocalDispatcher:
 
