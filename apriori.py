@@ -65,7 +65,7 @@ def get_initial_itemsets(transactions):
     return item_sets
 
 
-def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, get_candidates=join_sets, generational_max=None):
+def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, get_candidates=join_sets, generational_max=None, important_items=None):
     """
     Run the apriori algorithm. transactions is a sequence of records which can be iterated over repeatedly,
     where each record is a set of items.
@@ -75,6 +75,10 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rul
      - rules ((pre_tuple, post_tuple), confidence)
     """
     assert sets or rules
+    assert generational_max or not important_items
+
+    if important_items:
+        important_items = frozenset(important_items)
 
     logger = logging.getLogger(__name__)
 
@@ -98,7 +102,49 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rul
         print("count:", len(length_set))
 
         if generational_max and len(length_set) > generational_max:
-            length_set.sort(key=item_set_counts.get, reverse=True)
+            logger.info("Pruning item sets according to their utility.")
+
+            if important_items:
+                # Ensure that we have counts for all the item sets we're going to need.
+                counts_needed = set()
+                for item_set in length_set:
+                    for important_item in important_items:
+                        basis = item_set - frozenset([important_item])
+                        if basis not in item_set_counts:
+                            counts_needed.add(basis)
+                determine_support(counts_needed, transactions, item_set_counts)
+                del counts_needed
+
+                # Determine the utility of each item set as its maximum predictive power when converted to a rule that
+                # predicts the presense or absense of any of the important items. Use item set counts as a tie-breaker.
+                utilities = {}
+                for item_set in length_set:
+                    for important_item in important_items:
+                        if important_item in item_set:
+                            basis = item_set - frozenset([important_item])
+                            utility = item_set_counts[item_set] / item_set_counts[basis]
+                            utility = 2 * max(utility, 1 - utility)
+                        else:
+                            utility = 1
+
+                        pass                                            # left center
+                        #utility = (utility, item_set_counts[item_set])  # right center
+                        #utility = (item_set_counts[item_set], utility)  # left monitor      # Returned quickly, with 0 results
+                        #utility = item_set_counts[item_set] * utility   # right monitor
+
+                        if item_set not in utilities or utilities[item_set] < utility:
+                            utilities[item_set] = utility
+
+                print("Utility range:", min(utilities.values()), "to", max(utilities.values()))
+
+                # Keep only the item sets with the highest utility. Use item set counts as a tie-breaker.
+                length_set.sort(key=utilities.get, reverse=True)
+                del utilities
+            else:
+                # Keep only the item sets with the highest rate of occurrence.
+                length_set.sort(key=item_set_counts.get, reverse=True)
+
+            # Trim the length set down to the maximum permitted.
             length_set = length_set[:generational_max]
 
         large_sets.append(length_set)
@@ -115,30 +161,38 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rul
             item_set_counts
         )
 
-    if sets:
-        result_items = []
-        transaction_count = len(transactions)
-        for size, item_sets in enumerate(large_sets):
-            if not size:
-                continue
+    result_items = []
+    result_rules = []
+    transaction_count = len(transactions)
+    size = 0
+    while large_sets:
+        item_sets = large_sets.pop(0)
+
+        if size and sets:
             logger.info("Determining support values for itemsets of size %s.", size)
             # support = (# of occurrences) / (total # of transactions)
-            result_items.extend(
-                (item_set, item_set_counts[item_set] / transaction_count)
-                for item_set in item_sets
-            )
+            if important_items:
+                result_items.extend(
+                    (item_set, item_set_counts[item_set] / transaction_count)
+                    for item_set in item_sets
+                    if item_set & important_items
+                )
+            else:
+                result_items.extend(
+                    (item_set, item_set_counts[item_set] / transaction_count)
+                    for item_set in item_sets
+                )
 
-    if rules:
-        result_rules = []
-        for size, item_sets in enumerate(large_sets):
-            if size < 2:
-                continue
+        if size >= 2 and rules:
             logger.info("Determining rule confidence values for itemsets of size %s.", size)
             for item_set in item_sets:
+                if important_items and not item_set & important_items:
+                    continue
+
                 for subset in proper_subsets(item_set):
                     subset = frozenset(subset)
                     remain = frozenset(item_set.difference(subset))
-                    if len(remain) > 0:
+                    if len(remain) > 0 and (not important_items or not remain <= important_items):
                         # support = (# of occurrences) / (total # of transactions)
                         # confidence = (support for item_set) / (support for subset)
                         if subset not in item_set_counts:
@@ -149,6 +203,10 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rul
                                 (subset, remain),
                                 confidence)
                             )
+
+        item_sets.clear()
+        del item_sets
+        size += 1
 
     logger.info("Processing complete.")
 
@@ -192,7 +250,7 @@ class AprioriMerge:
         return run_apriori(transactions, min_support, min_confidence, sets, rules, get_candidates=self.get_candidates)
 
 
-def run_distributed_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, generational_max=None, chunk_size=5000, dispatcher=None):
+def run_distributed_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, generational_max=None, important_items=None, chunk_size=5000, dispatcher=None):
     if dispatcher is None:
         dispatcher = LocalDispatcher(multiprocessing.cpu_count())
     chunk = []
@@ -200,7 +258,7 @@ def run_distributed_apriori(transactions, min_support=.15, min_confidence=.6, se
     for index, transaction in enumerate(transactions):
         if chunk and not index % chunk_size:
             print("Dispatching chunk of length", chunk_size)
-            dispatcher.dispatch(chunk, min_support, min_confidence, rules=False, generational_max=generational_max)
+            dispatcher.dispatch(chunk, min_support, min_confidence, rules=False, generational_max=generational_max, important_items=important_items)
             chunk = []
         for results in dispatcher.results():
             print("Processing results of length", len(results))
@@ -208,7 +266,7 @@ def run_distributed_apriori(transactions, min_support=.15, min_confidence=.6, se
         chunk.append(transaction)
     if chunk:
         print("Dispatching chunk of length", chunk_size)
-        dispatcher.dispatch(chunk, min_support, min_confidence, rules=False, generational_max=generational_max)
+        dispatcher.dispatch(chunk, min_support, min_confidence, rules=False, generational_max=generational_max, important_items=important_items)
     while dispatcher.more():
         dispatcher.wait()
         for results in dispatcher.results():
@@ -227,6 +285,7 @@ def _execute(results_queue, args, kwargs):
         print("Successfully queued", len(results), "results.")
     except:
         traceback.print_exc()
+
 
 class LocalDispatcher:
 

@@ -22,7 +22,7 @@ setup(
     version=__version__,
     description='Apriori Algorithm (association rule learning)',
     long_description=long_description,
-    url='https://github.com/hosford42/xcs',
+    url='https://github.com/SaintAttila/Apriori',
     author=__author__,
     author_email='hosford42@gmail.com',
     license='MIT',
