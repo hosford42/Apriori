@@ -28,15 +28,10 @@ def proper_subsets(item_set):
 
 
 def determine_support(item_sets, transactions, item_set_counts):
-    additional_counts = {}
     for transaction in transactions:
         for item_set in item_sets:
             if item_set <= transaction:
-                additional_counts[item_set] = additional_counts.get(item_set, 0) + 1
-
-    # Do this all at once for speed.
-    for item_set, count in additional_counts.items():
-        item_set_counts[item_set] = item_set_counts.get(item_set, 0) + count
+                item_set_counts[item_set] = item_set_counts.get(item_set, 0) + 1
 
 
 def get_items_with_min_support(item_sets, transactions, min_support, item_set_counts):
@@ -134,8 +129,8 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rul
                         else:
                             utility = 1
 
-                        pass                                            # left center
-                        #utility = (utility, item_set_counts[item_set])  # right center
+                        #pass                                            # left center
+                        utility = (utility, item_set_counts[item_set])  # right center
                         #utility = item_set_counts[item_set] * utility   # extra monitor
 
                         # Discarded:
@@ -442,6 +437,7 @@ def data_from_file(file, ordered=False, ignore=None, dialect='excel', *args, **k
         return list(iter_rows(file, ordered, ignore, dialect, *args, **kwargs))
 
 
+# TODO: This really belongs in savemem, not apriori.
 class FileIterator:
     """File iterator, for efficiently and repeatedly iterating over the records in a potentially large file without
     keeping it loaded in memory."""
