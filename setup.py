@@ -43,4 +43,5 @@ setup(
 
     keywords='apriori algorithm itemsets associative rule learning',
     py_modules=['apriori'],
+    install_requires=['savemem'],
 )
