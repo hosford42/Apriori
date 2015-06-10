@@ -19,8 +19,11 @@ import traceback
 from itertools import chain, combinations
 
 
+import savemem
+
+
 def proper_subsets(item_set):
-    """Return non-empty proper subsets of arr"""
+    """Return non-empty proper subsets of item_set"""
     return chain(*(combinations(item_set, i) for i in range(1, len(item_set))))
 
 
@@ -29,7 +32,6 @@ def determine_support(item_sets, transactions, item_set_counts):
         for item_set in item_sets:
             if item_set <= transaction:
                 item_set_counts[item_set] = item_set_counts.get(item_set, 0) + 1
-
 
 
 def get_items_with_min_support(item_sets, transactions, min_support, item_set_counts):
@@ -129,8 +131,10 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rul
 
                         pass                                            # left center
                         #utility = (utility, item_set_counts[item_set])  # right center
-                        #utility = (item_set_counts[item_set], utility)  # left monitor      # Returned quickly, with 0 results
-                        #utility = item_set_counts[item_set] * utility   # right monitor
+                        #utility = item_set_counts[item_set] * utility   # left monitor
+
+                        # Discarded:
+                        #utility = (item_set_counts[item_set], utility)  # Returned quickly, with 0 results
 
                         if item_set not in utilities or utilities[item_set] < utility:
                             utilities[item_set] = utility
@@ -160,6 +164,15 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rul
             min_support,
             item_set_counts
         )
+
+    if rules:
+        old_item_set_counts = item_set_counts
+        item_set_counts = savemem.LowMemDict()
+        item_set_counts.auto_flush = True
+        item_set_counts.update(old_item_set_counts)
+        old_item_set_counts.clear()
+        del old_item_set_counts
+        print(item_set_counts.max_memory)
 
     result_items = []
     result_rules = []
