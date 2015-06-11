@@ -15,11 +15,15 @@ import csv
 import logging
 import multiprocessing
 import traceback
+import warnings
 
 from itertools import chain, combinations
 
 
-import savemem
+try:
+    import savemem
+except ImportError:
+    savemem = None
 
 
 def proper_subsets(item_set):
@@ -67,7 +71,7 @@ def get_initial_itemsets(transactions):
     return item_sets
 
 
-def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, get_candidates=join_sets, generational_max=None, important_items=None, max_size=None):
+def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, get_candidates=join_sets, generational_max=None, important_items=None, max_size=None, low_mem=False):
     """
     Run the apriori algorithm. transactions is a sequence of records which can be iterated over repeatedly,
     where each record is a set of items.
@@ -87,7 +91,15 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rul
     logger.info("Generating initial itemsets of size 1.")
     item_sets = get_initial_itemsets(transactions)
 
-    item_set_counts = savemem.LowMemDict()
+    if low_mem:
+        if savemem:
+            item_set_counts = savemem.LowMemDict()
+        else:
+            warnings.warn("The savemem module is not available. Using an ordinary dictionary.")
+            item_set_counts = {}
+    else:
+        item_set_counts = {}
+
     large_sets = [[]]
 
     logger.info("Identifying itemsets of size 1 with minimum support.")
@@ -253,11 +265,11 @@ class AprioriMerge:
         # return results
         return {item_set for item_set in self.candidates if len(item_set) == size}
 
-    def __call__(self, transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, max_size=None):
-        return run_apriori(transactions, min_support, min_confidence, sets, rules, get_candidates=self.get_candidates, max_size=max_size)
+    def __call__(self, transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, max_size=None, low_mem=False):
+        return run_apriori(transactions, min_support, min_confidence, sets, rules, get_candidates=self.get_candidates, max_size=max_size, low_mem=low_mem)
 
 
-def run_distributed_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, generational_max=None, important_items=None, max_size=None, chunk_size=5000, dispatcher=None):
+def run_distributed_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, generational_max=None, important_items=None, max_size=None, low_mem=False, chunk_size=5000, dispatcher=None):
     if dispatcher is None:
         dispatcher = LocalDispatcher(multiprocessing.cpu_count())
     chunk = []
@@ -265,7 +277,7 @@ def run_distributed_apriori(transactions, min_support=.15, min_confidence=.6, se
     for index, transaction in enumerate(transactions):
         if chunk and not index % chunk_size:
             print("Dispatching chunk of length", chunk_size)
-            dispatcher.dispatch(chunk, min_support, min_confidence, rules=False, generational_max=generational_max, important_items=important_items, max_size=max_size)
+            dispatcher.dispatch(chunk, min_support, min_confidence, rules=False, generational_max=generational_max, important_items=important_items, max_size=max_size, low_mem=low_mem)
             chunk = []
         for results in dispatcher.results():
             print("Processing results of length", len(results))
@@ -273,7 +285,7 @@ def run_distributed_apriori(transactions, min_support=.15, min_confidence=.6, se
         chunk.append(transaction)
     if chunk:
         print("Dispatching chunk of length", chunk_size)
-        dispatcher.dispatch(chunk, min_support, min_confidence, rules=False, generational_max=generational_max, important_items=important_items, max_size=max_size)
+        dispatcher.dispatch(chunk, min_support, min_confidence, rules=False, generational_max=generational_max, important_items=important_items, max_size=max_size, low_mem=low_mem)
     while dispatcher.more():
         dispatcher.wait()
         for results in dispatcher.results():
@@ -281,7 +293,7 @@ def run_distributed_apriori(transactions, min_support=.15, min_confidence=.6, se
             candidates.update(results)
     print("Total candidates identified:", len(candidates))
     merger = AprioriMerge(candidates)
-    return merger(transactions, min_support, min_confidence, sets, rules)
+    return merger(transactions, min_support, min_confidence, sets, rules, max_size, low_mem)
 
 
 def _execute(results_queue, args, kwargs):
