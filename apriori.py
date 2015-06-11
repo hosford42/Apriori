@@ -67,7 +67,7 @@ def get_initial_itemsets(transactions):
     return item_sets
 
 
-def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, get_candidates=join_sets, generational_max=None, important_items=None):
+def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, get_candidates=join_sets, generational_max=None, important_items=None, max_size=None):
     """
     Run the apriori algorithm. transactions is a sequence of records which can be iterated over repeatedly,
     where each record is a set of items.
@@ -129,8 +129,8 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rul
                         else:
                             utility = 1
 
-                        #pass                                            # left center
-                        utility = (utility, item_set_counts[item_set])  # right center
+                        pass                                            # left center
+                        #utility = (utility, item_set_counts[item_set])  # right center
                         #utility = item_set_counts[item_set] * utility   # extra monitor
 
                         # Discarded:
@@ -152,7 +152,10 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rul
             length_set = length_set[:generational_max]
 
         large_sets.append(length_set)
+
         size += 1
+        if max_size is not None and size > max_size:
+            break
 
         logger.info("Generating itemsets of size %s.", size)
         candidate_set = get_candidates(length_set, size)
@@ -250,11 +253,11 @@ class AprioriMerge:
         # return results
         return {item_set for item_set in self.candidates if len(item_set) == size}
 
-    def __call__(self, transactions, min_support=.15, min_confidence=.6, sets=True, rules=True):
-        return run_apriori(transactions, min_support, min_confidence, sets, rules, get_candidates=self.get_candidates)
+    def __call__(self, transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, max_size=None):
+        return run_apriori(transactions, min_support, min_confidence, sets, rules, get_candidates=self.get_candidates, max_size=max_size)
 
 
-def run_distributed_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, generational_max=None, important_items=None, chunk_size=5000, dispatcher=None):
+def run_distributed_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rules=True, generational_max=None, important_items=None, max_size=None, chunk_size=5000, dispatcher=None):
     if dispatcher is None:
         dispatcher = LocalDispatcher(multiprocessing.cpu_count())
     chunk = []
@@ -262,7 +265,7 @@ def run_distributed_apriori(transactions, min_support=.15, min_confidence=.6, se
     for index, transaction in enumerate(transactions):
         if chunk and not index % chunk_size:
             print("Dispatching chunk of length", chunk_size)
-            dispatcher.dispatch(chunk, min_support, min_confidence, rules=False, generational_max=generational_max, important_items=important_items)
+            dispatcher.dispatch(chunk, min_support, min_confidence, rules=False, generational_max=generational_max, important_items=important_items, max_size=max_size)
             chunk = []
         for results in dispatcher.results():
             print("Processing results of length", len(results))
@@ -270,7 +273,7 @@ def run_distributed_apriori(transactions, min_support=.15, min_confidence=.6, se
         chunk.append(transaction)
     if chunk:
         print("Dispatching chunk of length", chunk_size)
-        dispatcher.dispatch(chunk, min_support, min_confidence, rules=False, generational_max=generational_max, important_items=important_items)
+        dispatcher.dispatch(chunk, min_support, min_confidence, rules=False, generational_max=generational_max, important_items=important_items, max_size=max_size)
     while dispatcher.more():
         dispatcher.wait()
         for results in dispatcher.results():
