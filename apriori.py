@@ -110,6 +110,8 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rul
         item_set_counts
     )
 
+    transaction_count = len(transactions)
+
     size = 1
     while length_set:
         print("size:", size)
@@ -129,6 +131,13 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rul
                 determine_support(counts_needed, transactions, item_set_counts)
                 del counts_needed
 
+                # Determine the frequency of appearance of each important item in the current item sets.
+                #representation = {}
+                #for item_set in length_set:
+                #    for item in item_set & important_items:
+                #        representation[item] = representation.get(item, 0) + 1
+                #total_representation = sum(representation.values())
+
                 # Determine the utility of each item set as its maximum predictive power when converted to a rule that
                 # predicts the presense or absense of any of the important items. Use item set counts as a tie-breaker.
                 utilities = {}
@@ -136,24 +145,38 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rul
                     for important_item in important_items:
                         if important_item in item_set:
                             basis = item_set - frozenset([important_item])
-                            utility = item_set_counts[item_set] / item_set_counts[basis]
-                            utility = 2 * max(utility, 1 - utility)
+                            #utility = item_set_counts[item_set] / item_set_counts[basis] / (1 + representation.get(important_item, 0))
+                            #utility += 1  # utility = 2 * max(utility, 1 - utility)
+                            confidence = item_set_counts[item_set] / item_set_counts[basis]
+                            #rarity = 1 - representation.get(important_item, 0) / total_representation
                         else:
-                            utility = 1
+                            confidence = 0
+                            #rarity = 0
 
-                        pass                                            # left center
-                        #utility = (utility, item_set_counts[item_set])  # right center
-                        #utility = item_set_counts[item_set] * utility   # extra monitor
-
-                        # Discarded:
-                        #utility = (item_set_counts[item_set], utility)  # Returned quickly, with 0 results
+                        # TODO: Determine which of these works best:
+                        #utility = (item_set_counts[item_set], confidence)
+                        #utility = item_set_counts[item_set] * (1 + confidence)
+                        #utility = confidence
+                        utility = (confidence, item_set_counts[item_set])
+                        #utility = (item_set_counts[item_set], confidence * rarity)
+                        #utility = item_set_counts[item_set] * (1 + confidence * rarity)
+                        #utility = confidence * rarity
+                        #utility = (confidence * rarity, item_set_counts[item_set])
+                        #utility = (item_set_counts[item_set], confidence + rarity)
+                        #utility = item_set_counts[item_set] * (1 + confidence + rarity)
+                        #utility = confidence + rarity
+                        #utility = (confidence + rarity, item_set_counts[item_set])
+                        #utility = (item_set_counts[item_set], confidence, rarity)
+                        #utility = (item_set_counts[item_set] * (1 + confidence), rarity)
+                        #utility = (confidence, rarity)
+                        #utility = (confidence, rarity, item_set_counts[item_set])
 
                         if item_set not in utilities or utilities[item_set] < utility:
                             utilities[item_set] = utility
 
                 print("Utility range:", min(utilities.values()), "to", max(utilities.values()))
 
-                # Keep only the item sets with the highest utility. Use item set counts as a tie-breaker.
+                # Keep only the item sets with the highest utility.
                 length_set.sort(key=utilities.get, reverse=True)
                 del utilities
             else:
@@ -182,7 +205,6 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rul
 
     result_items = []
     result_rules = []
-    transaction_count = len(transactions)
     size = 0
     while large_sets:
         item_sets = large_sets.pop(0)
@@ -211,17 +233,19 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6, sets=True, rul
                 for subset in proper_subsets(item_set):
                     subset = frozenset(subset)
                     remain = frozenset(item_set.difference(subset))
-                    if len(remain) > 0 and (not important_items or not remain <= important_items):
+                    if len(remain) > 0 and (not important_items or remain <= important_items):
                         # support = (# of occurrences) / (total # of transactions)
                         # confidence = (support for item_set) / (support for subset)
                         if subset not in item_set_counts:
-                            determine_support([subset], transactions, item_set_counts)
+                            determine_support([subset, remain], transactions, item_set_counts)
                         confidence = item_set_counts[item_set] / item_set_counts[subset]
+                        coverage = item_set_counts[subset] / transaction_count
+                        rarity = 1 - item_set_counts[remain] / transaction_count
                         if confidence >= min_confidence:
                             result_rules.append((
                                 (subset, remain),
-                                confidence)
-                            )
+                                (confidence, coverage, rarity),
+                            ))
 
         item_sets.clear()
         del item_sets
@@ -419,37 +443,37 @@ def write_rules(path, rules, ordered=False, dialect='excel', *args, **kwargs):
 
 
 # noinspection PyShadowingNames
-def iter_rows(file_obj, ordered=False, ignore=None, dialect='excel', *args, **kwargs):
+def iter_rows(file_obj, row_type=frozenset, ordered=False, ignore=None, dialect='excel', *args, **kwargs):
     """Return an iterator over the rows in the file."""
     reader = csv.reader(file_obj, dialect, *args, **kwargs)
 
     if ordered:
         if ignore:
-            get_record = lambda row: frozenset(
+            get_record = lambda row: row_type(
                 (index, value)
                 for index, value in enumerate(row)
                 if not ignore(index, value)
             )
         else:
-            get_record = lambda row: frozenset((index, value) for index, value in enumerate(row))
+            get_record = lambda row: row_type((index, value) for index, value in enumerate(row))
     else:
         if ignore:
-            get_record = lambda row: frozenset(value for index, value in enumerate(row) if not ignore(index, value))
+            get_record = lambda row: row_type(value for index, value in enumerate(row) if not ignore(index, value))
         else:
-            get_record = frozenset
+            get_record = row_type
 
     return (get_record(row) for row in reader if row and (len(row) > 1 or row[0]))
 
 
 # noinspection PyShadowingNames
-def data_from_file(file, ordered=False, ignore=None, dialect='excel', *args, **kwargs):
+def data_from_file(file, row_type=frozenset, ordered=False, ignore=None, dialect='excel', *args, **kwargs):
     """Function which reads from the file and returns a list of records"""
     if isinstance(file, str):
         with open(file, newline='') as file_iter:
-            return list(iter_rows(file_iter, ordered, ignore, dialect, *args, **kwargs))
+            return list(iter_rows(file_iter, row_type, ordered, ignore, dialect, *args, **kwargs))
     else:
         # If it's not a file name, assume it's a file-like object
-        return list(iter_rows(file, ordered, ignore, dialect, *args, **kwargs))
+        return list(iter_rows(file, row_type, ordered, ignore, dialect, *args, **kwargs))
 
 
 # TODO: This really belongs in savemem, not apriori.
@@ -458,8 +482,9 @@ class FileIterator:
     keeping it loaded in memory."""
 
     # noinspection PyShadowingNames
-    def __init__(self, file_path, ordered=False, ignore=None, dialect='excel', *args, **kwargs):
+    def __init__(self, file_path, row_type=frozenset, ordered=False, ignore=None, dialect='excel', *args, **kwargs):
         self.file_path = file_path
+        self.row_type = row_type
         self.ordered = bool(ordered)
         self.ignore = ignore
         self.dialect = dialect
@@ -477,7 +502,7 @@ class FileIterator:
 
     def __iter__(self):
         with open(self.file_path, newline='') as file:
-            for row in iter_rows(file, self.ordered, self.ignore, self.dialect, *self.args, **self.kwargs):
+            for row in iter_rows(file, self.row_type, self.ordered, self.ignore, self.dialect, *self.args, **self.kwargs):
                 yield row
 
 
