@@ -9,7 +9,7 @@ Usage:
 
 # For full authorship and copyright information, see the mit-license file
 __author__ = 'Abhinav Saini, Aaron Hosford'
-__version__ = "0.1.0"
+__version__ = "0.1"
 
 import csv
 import logging
