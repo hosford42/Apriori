@@ -7,15 +7,16 @@ Usage:
     $python apriori.py -f DATA_SET.csv -s 0.15 -c 0.6
 """
 
-# For full authorship and copyright information, see the mit-license file
-__author__ = 'Abhinav Saini, Aaron Hosford'
-__version__ = "0.1"
-
 import csv
 import logging
 
 from itertools import chain, combinations
 from collections import defaultdict
+
+
+# For full authorship and copyright information, see the mit-license file
+__author__ = 'Abhinav Saini, Aaron Hosford'
+__version__ = "0.1"
 
 
 def proper_subsets(item_set):
@@ -222,16 +223,19 @@ def iter_rows(file_obj, ordered=False, ignore=None, dialect='excel', *args, **kw
 
     if ordered:
         if ignore:
-            get_record = lambda row: frozenset(
-                (index, value)
-                for index, value in enumerate(row)
-                if not ignore(index, value)
-            )
+            def get_record(row):
+                return frozenset(
+                    (index, value)
+                    for index, value in enumerate(row)
+                    if not ignore(index, value)
+                )
         else:
-            get_record = lambda row: frozenset((index, value) for index, value in enumerate(row))
+            def get_record(row):
+                return frozenset((index, value) for index, value in enumerate(row))
     else:
         if ignore:
-            get_record = lambda row: frozenset(value for index, value in enumerate(row) if not ignore(index, value))
+            def get_record(row):
+                return frozenset(value for index, value in enumerate(row) if not ignore(index, value))
         else:
             get_record = frozenset
 
