@@ -10,6 +10,8 @@ from os import path
 
 from apriori import __version__
 
+PACKAGE_NAME = 'apriori'
+
 here = path.abspath(path.dirname(__file__))
 
 long_description = """
