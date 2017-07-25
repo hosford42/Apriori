@@ -1,17 +1,16 @@
 """
 Description: Python implementation of the Apriori Algorithm
-
-Usage:
-    $python apriori.py -f DATA_SET.csv -s minSupport  -c minConfidence
-
-    $python apriori.py -f DATA_SET.csv -s 0.15 -c 0.6
+=======
+An implementation of the Apriori algorithm for Python 3.
 """
 
 import csv
 import logging
 
-from itertools import chain, combinations
 from collections import defaultdict
+from itertools import combinations, chain
+
+from hashable_arrays import BitArray
 
 
 # For full authorship and copyright information, see the mit-license file
@@ -24,65 +23,79 @@ def proper_subsets(item_set):
     return chain(*(combinations(item_set, i) for i in range(1, len(item_set))))
 
 
-def get_items_with_min_support(item_sets, transactions, min_support, item_set_counts):
-    """Calculates the support for items in the itemset and returns a subset
-    of the itemset each of whose elements satisfies the minimum support."""
+# TODO: I think I need to switch from ints to actual bitarrays of some sort. It's taking much longer to run like this.
 
-    # TODO: If we used bit strings instead of sets, would that speed things up? Maybe numpy can help here...
-    for transaction in transactions:
-        for item_set in item_sets:
-            if item_set <= transaction:
-                item_set_counts[item_set] += 1
 
-    min_count = min_support * len(transactions)
-    return [item_set for item_set in item_sets if item_set_counts[item_set] >= min_count]
+def subsets(item_set):
+    """Return an iterator over all subsets of the item set."""
+    indices = [index for index in range(item_set.bit_length()) if item_set & (1 << index)]
+    for combination in chain(*(combinations(indices, size) for size in range(1, len(indices) + 1))):
+        result = 0
+        for index in combination:
+            result |= (1 << index)
+        yield result
+
+
+def get_initial_item_sets(bit_count):
+    """Return the item sets of size 1."""
+    item_sets = []
+    bit_list = [False] * bit_count
+    for index in range(bit_count):
+        bit_list[index] = True
+        item_sets.append(BitArray(bit_list))
+        bit_list[index] = False
+    return item_sets
 
 
 def join_sets(item_sets, length):
-    """Join a set with itself and returns the n-element itemsets"""
+    """Combine the item sets together, returning the unique combinations that have the requested length."""
     result = set()
-    for i in item_sets:
-        for j in item_sets:
-            u = i | j
-            if len(u) == length:
-                result.add(u)
+    for index1, item_set1 in enumerate(item_sets):
+        for index2 in range(index1 + 1, len(item_sets)):
+            item_set2 = item_sets[index2]
+            combined = item_set1 | item_set2
+            if combined.bit_count() == length:
+                result.add(combined)
     return result
 
 
-def get_initial_itemsets(transactions):
-    """Return the itemsets of size 1."""
-    all_items = set()
-    for transaction in transactions:
-        all_items |= transaction
+def get_items_with_min_support(item_sets, transactions_bitmasks, min_support, item_set_counts):
+    """Determine the occurrence count for each item set. Filter out the item sets that have insufficient support,
+    returning those with sufficient support as a list."""
 
-    item_sets = []
-    for item in all_items:
-        item_sets.append(frozenset({item}))
+    for transaction in transactions_bitmasks:
+        inv_transaction = ~transaction
+        for item_set in item_sets:
+            if not (item_set & inv_transaction):
+                item_set_counts[item_set] += 1
 
-    return item_sets
+    min_count = min_support * len(transactions_bitmasks)
+    return [item_set for item_set in item_sets if item_set_counts[item_set] >= min_count]
 
 
 def run_apriori(transactions, min_support=.15, min_confidence=.6):
     """
-    Run the apriori algorithm. transactions is a sequence of records which can be iterated over repeatedly,
-    where each record is a set of items.
-
-    Return both:
-     - itemsets (tuple, support)
-     - rules ((pre_tuple, post_tuple), confidence)
+    Run the Apriori algorithm, returning a pair (item_sets, rules), where item_sets is a list of pairs
+    (item_set, support), and rules is a list of pairs ((condition, prediction), confidence). The transactions argument
+    should be a sequence of records which can be iterated over repeatedly, where each record is a set of items.
     """
+
     logger = logging.getLogger(__name__)
 
-    logger.info("Generating initial itemsets of size 1.")
-    item_sets = get_initial_itemsets(transactions)
+    logger.info("Converting transactions to bitmasks.")
+    converter = BitConverter.from_transactions(transactions)
+    transaction_bitmasks = [converter.to_bits(transaction) for transaction in transactions]
+
+    logger.info("Generating initial item sets of size 1.")
+    item_sets = get_initial_item_sets(converter.bit_count)
 
     item_set_counts = defaultdict(int)
     large_sets = [[]]
 
-    logger.info("Identifying itemsets of size 1 with minimum support.")
+    logger.info("Identifying item sets of size 1 with minimum support.")
     current_length_set = get_items_with_min_support(
         item_sets,
-        transactions,
+        transaction_bitmasks,
         min_support,
         item_set_counts
     )
@@ -92,28 +105,33 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6):
         large_sets.append(current_length_set)
         size += 1
 
-        logger.info("Generating itemsets of size %s.", size)
+        logger.info("Generating item sets of size %s.", size)
         current_length_set = join_sets(current_length_set, size)
 
-        logger.info("Identifying itemsets of size %s with minimum support.", size)
+        logger.info("Identifying item sets of size %s with minimum support.", size)
         current_candidate_set = get_items_with_min_support(
             current_length_set,
-            transactions,
+            transaction_bitmasks,
             min_support,
             item_set_counts
         )
 
+        # Free up some wasted space.
+        for item_set in current_length_set:
+            if item_set not in current_candidate_set:
+                del item_set_counts[item_set]
+
         current_length_set = current_candidate_set
 
     result_items = []
-    transaction_count = len(transactions)
+    transaction_count = len(transaction_bitmasks)
     for size, item_sets in enumerate(large_sets):
-        if not size:
+        if size < 1:
             continue
-        logger.info("Determining support values for itemsets of size %s.", size)
+        logger.info("Determining support values for item sets of size %s.", size)
         # support = (# of occurrences) / (total # of transactions)
         result_items.extend(
-            (item_set, item_set_counts[item_set] / transaction_count)
+            (converter.from_bits(item_set), item_set_counts[item_set] / transaction_count)
             for item_set in item_sets
         )
 
@@ -121,18 +139,19 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6):
     for size, item_sets in enumerate(large_sets):
         if size < 2:
             continue
-        logger.info("Determining rule confidence values for itemsets of size %s.", size)
+        logger.info("Determining rule confidence values for item sets of size %s.", size)
         for item_set in item_sets:
-            for subset in proper_subsets(item_set):
-                subset = frozenset(subset)
-                remain = frozenset(item_set.difference(subset))
-                if len(remain) > 0:
+            for subset in subsets(item_set):
+                if not subset or subset == item_set:
+                    continue
+                remain = item_set - subset
+                if remain.bit_length() > 0:
                     # support = (# of occurrences) / (total # of transactions)
                     # confidence = (support for item_set) / (support for subset)
                     confidence = item_set_counts[item_set] / item_set_counts[subset]
                     if confidence >= min_confidence:
                         result_rules.append((
-                            (subset, remain),
+                            (converter.from_bits(subset), converter.from_bits(remain)),
                             confidence)
                         )
 
@@ -140,51 +159,50 @@ def run_apriori(transactions, min_support=.15, min_confidence=.6):
     return result_items, result_rules
 
 
-def itemset_to_string(itemset, ordered=False):
-    """Converts an itemset to a readable string."""
+def item_set_to_string(item_set, ordered=False):
+    """Converts an item set to a readable string."""
     if ordered:
-        return ', '.join(str(index) + ': ' + value for index, value in sorted(itemset))
+        return ', '.join(str(index) + ': ' + value for index, value in sorted(item_set))
     else:
-        return ', '.join(str(value) for value in sorted(itemset))
+        return ', '.join(str(value) for value in sorted(item_set))
 
 
-# noinspection PyShadowingNames
-def print_itemsets(itemsets, ordered=False):
-    """Prints the generated itemsets."""
-    for itemset, support in sorted(itemsets, key=lambda pair: (pair[-1], pair), reverse=True):
-        print("Itemset: %s  [%.3f]" % (itemset_to_string(itemset, ordered), support))
+
+def print_item_sets(item_sets, ordered=False):
+    """Prints the generated item sets."""
+    for item_set, support in sorted(item_sets, key=lambda pair: (pair[-1], pair), reverse=True):
+        print("Item set: %s  [%.3f]" % (item_set_to_string(item_set, ordered), support))
 
 
-# noinspection PyShadowingNames
 def print_rules(rules, ordered=False):
     """Prints the generated rules."""
     for (condition, prediction), confidence in sorted(rules, key=lambda pair: (pair[-1], pair), reverse=True):
         print("Rule: %s  =>  %s  [%.3f]" % (
-            itemset_to_string(condition, ordered),
-            itemset_to_string(prediction, ordered),
+            item_set_to_string(condition, ordered),
+            item_set_to_string(prediction, ordered),
             confidence
         ))
 
 
 # noinspection PyShadowingNames
-def write_itemsets(path, itemsets, ordered=False, dialect='excel', *args, **kwargs):
+def write_item_sets(path, item_sets, ordered=False, dialect='excel', *args, **kwargs):
     """
-    Writes the itemsets out to a file in CSV format. The rows are organized as follows:
-        "Support", "Size of Itemset", "Value1", ..., "ValueN"
+    Writes the item_sets out to a file in CSV format. The rows are organized as follows:
+        "Support", "Size of Item Set", "Value1", ..., "ValueN"
     If the input file is ordered, indices are prepended to the values, with a separating colon, i.e. "Index: Value".
     """
     with open(path, 'w', newline='') as save_file:
         writer = csv.writer(save_file, dialect, *args, **kwargs)
 
         if ordered:
-            for itemset, support in sorted(itemsets, key=lambda pair: (pair[-1], pair), reverse=True):
-                row = [support, len(itemset)]
-                row.extend(str(index) + ': ' + str(value) for index, value in sorted(itemset))
+            for item_set, support in sorted(item_sets, key=lambda pair: (pair[-1], pair), reverse=True):
+                row = [support, len(item_set)]
+                row.extend(str(index) + ': ' + value for index, value in sorted(item_set))
                 writer.writerow(row)
         else:
-            for itemset, support in sorted(itemsets, key=lambda pair: (pair[-1], pair), reverse=True):
-                row = [support, len(itemset)]
-                row.extend(str(item) for item in sorted(itemset))
+            for item_set, support in sorted(item_sets, key=lambda pair: (pair[-1], pair), reverse=True):
+                row = [support, len(item_set)]
+                row.extend(sorted(item_set))
                 writer.writerow(row)
 
 
@@ -281,6 +299,62 @@ class FileIterator:
                 yield row
 
 
+# TODO: Check out the bitsets library, available via pip. It does pretty much the same thing.
+class BitConverter:
+    """Converts item sets to integer bitmasks and vice versa."""
+
+    @classmethod
+    def _iter_transaction_items(cls, transactions):
+        for transaction in transactions:
+            for item in transaction:
+                yield item
+
+    @classmethod
+    def from_transactions(cls, transactions, frozen=True):
+        """Create a BitConverter from a sequence of transactions. This eliminates the need to construct a single set
+        or list of values before passing it in to the constructor."""
+        return cls(cls._iter_transaction_items(transactions), frozen)
+
+    def __init__(self, items, frozen=True):
+        self._items = []
+        self._item_index_map = {}
+        self.frozen = frozen
+
+        if isinstance(items, (set, frozenset)):
+            self._items.extend(items)
+            del items  # Don't keep it around any longer than necessary, as it may be very large.
+            for index, item in enumerate(self._items):
+                self._item_index_map[item] = index
+        else:
+            for item in items:
+                if item not in self._item_index_map:
+                    self._item_index_map[item] = len(self._items)
+                    self._items.append(item)
+
+        self._bit_count = len(self._items)
+
+    @property
+    def bit_count(self):
+        """The number of bits used to represent the sets."""
+        return self._bit_count
+
+    def to_bits(self, item_set):
+        """Return an integer that represents the given item set."""
+        return BitArray.from_indices((self._item_index_map[item] for item in item_set), self._bit_count)
+
+    def from_bits(self, bits):
+        """Return the item set that the given integer represents."""
+        result = set()
+        for index, bit in enumerate(bits):
+            if bit:
+                result.add(self._items[index])
+
+        if self.frozen:
+            return frozenset(result)
+        else:
+            return result
+
+
 if __name__ == "__main__":
     import sys
 
@@ -324,14 +398,9 @@ if __name__ == "__main__":
                              help='exclude the comma-separated, zero-based column indices before processing',
                              default='',
                              type='string')
-    option_parser.add_option('-m', '--in-memory',
-                             action='store_true',
-                             dest='in_memory',
-                             help='load data to memory, rather than reading it from file repeatedly',
-                             default=False)
-    option_parser.add_option('-i', '--itemsets-file',
-                             dest='itemsets',
-                             help='filename where itemsets are saved (csv format)',
+    option_parser.add_option('-i', '--item-sets-file',
+                             dest='item_sets',
+                             help='filename where item sets are saved (csv format)',
                              default=None)
     option_parser.add_option('-r', '--rules-file',
                              dest='rules',
@@ -385,17 +454,17 @@ if __name__ == "__main__":
         print('No data set filename specified, system with exit\n')
         sys.exit('System will exit')
 
-    if options.in_memory or options.input is None:
-        transactions_iterable = data_from_file(options.input or sys.stdin, options.ordered, value_filter)
+    if options.input is None:
+        transactions_iterable = data_from_file(sys.stdin, options.ordered, value_filter)
     else:
         transactions_iterable = FileIterator(options.input, options.ordered, value_filter)
 
-    itemsets, rules = run_apriori(transactions_iterable, options.min_support, options.min_confidence)
+    item_sets, rules = run_apriori(transactions_iterable, options.min_support, options.min_confidence)
 
-    if options.itemsets:
-        write_itemsets(options.itemsets, itemsets, options.ordered)
-    elif options.itemsets is None:
-        print_itemsets(itemsets, options.ordered)
+    if options.item_sets:
+        write_item_sets(options.item_sets, item_sets, options.ordered)
+    elif options.item_sets is None:
+        print_item_sets(item_sets, options.ordered)
 
     if options.rules:
         write_rules(options.rules, rules, options.ordered)
